@@ -330,30 +330,47 @@ function extractOneFile(file, docIdx, docTotal, onProgress) {
         var batches=[];
         for (var b=0; b<toOcr.length; b+=BATCH) batches.push(toOcr.slice(b,b+BATCH));
 
-        onProgress('OCR: '+toOcr.length+' pages, '+batches.length+' batches, running '+CONCURRENT+' in parallel');
+        // Step 1: render ALL page images sequentially (canvas is single-threaded, must be sequential)
+        // Then step 2: fire API calls in parallel groups - no rendering bottleneck blocking them
+        onProgress('OCR: rendering '+toOcr.length+' pages to images...');
 
-        // Run CONCURRENT batches at a time
-        function runBatchGroup(startIdx) {
-          if (startIdx >= batches.length) return Promise.resolve();
-          var group = batches.slice(startIdx, startIdx + CONCURRENT);
+        var renderChain = Promise.resolve();
+        var renderedBatches = batches.map(function(batch){ return {batch:batch, images:null}; });
+
+        renderedBatches.forEach(function(rb, i){
+          renderChain = renderChain.then(function(){
+            onProgress('OCR: rendering page images '+(i*BATCH+1)+'/'+toOcr.length);
+            return Promise.all(rb.batch.map(function(x){ return renderPageToBase64(x.page); }))
+              .then(function(imgs){ rb.images = imgs; });
+          });
+        });
+
+        // Step 2: after all images rendered, fire API calls CONCURRENT at a time
+        var ocrChain = renderChain.then(function(){
+          onProgress('OCR: all images ready, firing '+batches.length+' API calls '+CONCURRENT+' at a time...');
           var completed = 0;
-          return Promise.all(group.map(function(batch) {
-            var nums = batch.map(function(x){ return x.pageNum; });
-            return Promise.all(batch.map(function(x){ return renderPageToBase64(x.page); }))
-              .then(function(imgs){ return ocrBatch(imgs, nums[0], apiKey); })
-              .then(function(raw){
-                completed++;
-                onProgress('OCR: '+(startIdx+completed)+'/'+batches.length+' batches done');
-                batch.forEach(function(item,idx){
-                  var mk='--- PAGE '+item.pageNum+' ---';
-                  var nm=batch[idx+1]?'--- PAGE '+batch[idx+1].pageNum+' ---':null;
-                  var s=raw.indexOf(mk), e=nm?raw.indexOf(nm):raw.length;
-                  ocrMap[item.pageNum]=s>=0?raw.slice(s+mk.length,e>0?e:undefined).trim():raw;
+
+          function runGroup(startIdx) {
+            if (startIdx >= renderedBatches.length) return Promise.resolve();
+            var group = renderedBatches.slice(startIdx, startIdx + CONCURRENT);
+            return Promise.all(group.map(function(rb){
+              var nums = rb.batch.map(function(x){ return x.pageNum; });
+              return ocrBatch(rb.images, nums[0], apiKey)
+                .then(function(raw){
+                  completed++;
+                  onProgress('OCR: '+completed+'/'+batches.length+' API calls done');
+                  rb.batch.forEach(function(item,idx){
+                    var mk='--- PAGE '+item.pageNum+' ---';
+                    var nm=rb.batch[idx+1]?'--- PAGE '+rb.batch[idx+1].pageNum+' ---':null;
+                    var s=raw.indexOf(mk), e=nm?raw.indexOf(nm):raw.length;
+                    ocrMap[item.pageNum]=s>=0?raw.slice(s+mk.length,e>0?e:undefined).trim():raw;
+                  });
                 });
-              });
-          })).then(function(){ return runBatchGroup(startIdx+CONCURRENT); });
-        }
-        var ocrChain = runBatchGroup(0);
+            })).then(function(){ return runGroup(startIdx+CONCURRENT); });
+          }
+
+          return runGroup(0);
+        });
         return ocrChain.then(function(){
           var out='';
           for (var k=0; k<pageData.length; k++) {
