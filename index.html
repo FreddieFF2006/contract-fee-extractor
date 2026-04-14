@@ -783,6 +783,129 @@ async function extractAllFiles(files) {
   return parts.join('\n\n');
 }
 
+
+// ── Claude API: fee extraction ──
+const FEE_SYSTEM = `You are a contract analysis specialist. You will receive one or more related contract documents merged together (each clearly labelled with its filename). Analyse ALL of them as a single contract package.
+
+Extract EVERY fee, charge, payment, royalty, or service fee calculation found anywhere across ALL documents. When definitions in one document apply to fee calculations in another, treat them as connected.
+
+For each fee type found, output an object with exactly these fields:
+- "fee_name": short human-readable name
+- "section_reference": section/clause number and which document it comes from
+- "description": 1-2 sentence plain-English summary
+- "variables": object of short symbol keys mapped to plain-English definitions
+- "tiers": array of {tier_name, condition, equation} objects using your variable symbols
+- "total_equation": complete combined algebraic equation
+- "notes": floors, caps, exemptions, cross-document references
+
+Return ONLY a valid JSON array. No markdown, no code fences. Pure JSON only.`;
+
+async function callAPI(text) {
+  const key = sessionStorage.getItem('cf_api_key') || document.getElementById('api-key').value.trim();
+  if (!key) throw new Error('No API key — please enter your Anthropic key above.');
+  const truncated = text.length > 100000 ? text.slice(0, 100000) + '\n[truncated]' : text;
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 8000,
+      system: FEE_SYSTEM,
+      messages: [{ role: 'user', content: 'Extract all fee calculation sections from this contract package.\n\nDOCUMENTS:\n' + truncated }]
+    })
+  });
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({}));
+    throw new Error('API ' + resp.status + ': ' + (e?.error?.message || resp.statusText));
+  }
+  const data = await resp.json();
+  let raw = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
+  return JSON.parse(raw);
+}
+
+// ── Python module generator ──
+function generateModule(fees, filenames) {
+  const names = Array.isArray(filenames) ? filenames : [filenames];
+  const label = names.join(', ');
+  const stem  = names[0].replace(/\.pdf$/i, '').replace(/\s+/g, '_');
+  const today = new Date().toISOString().slice(0, 10);
+  const L = [];
+
+  L.push('"""\nAuto-generated Fee Calculator\nSources : ' + label + '\nDate    : ' + today + '\n\nUsage:\n    from ' + stem + '_fee_equations import print_equation_summary, get_all_equations\n    print_equation_summary()\n"""');
+  L.push('from __future__ import annotations\n');
+
+  for (const fee of fees) {
+    const fn     = 'calculate_' + fee.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+    const params = Object.keys(fee.variables || {});
+    const ps     = params.length ? params.map(p => p + ': float').join(', ') : '**kwargs';
+    const tiers  = fee.tiers || [];
+    L.push('# ' + '-'.repeat(66) + '\n# ' + fee.fee_name + '  [' + fee.section_reference + ']\n# ' + '-'.repeat(66) + '\n');
+    L.push('def ' + fn + '(' + ps + ') -> dict:');
+    L.push('    """\n    ' + fee.fee_name + '  [' + fee.section_reference + ']\n\n    DESCRIPTION\n    ' + '-'.repeat(40) + '\n    ' + (fee.description||'') + '\n\n    VARIABLES\n    ' + '-'.repeat(40));
+    for (const [v,d] of Object.entries(fee.variables||{})) L.push('    ' + v.padEnd(8) + ': ' + d);
+    if (tiers.length > 1) {
+      L.push('\n    TIERS\n    ' + '-'.repeat(40));
+      for (const t of tiers) L.push('    [' + t.tier_name + ']\n      Condition : ' + t.condition + '\n      Equation  : ' + t.equation);
+    }
+    L.push('\n    TOTAL EQUATION\n    ' + '-'.repeat(40) + '\n    ' + (fee.total_equation||''));
+    if (fee.notes) L.push('\n    NOTES\n    ' + '-'.repeat(40) + '\n    ' + fee.notes);
+    L.push('    """\n    tiers = []');
+    for (const t of tiers) L.push('    tiers.append({"tier_name": ' + JSON.stringify(t.tier_name) + ', "condition": ' + JSON.stringify(t.condition) + ', "equation": ' + JSON.stringify(t.equation) + ', "fee": None})');
+    L.push('    return {"fee_name": ' + JSON.stringify(fee.fee_name) + ', "section": ' + JSON.stringify(fee.section_reference) + ', "inputs": {' + params.map(p => '"'+p+'": '+p).join(', ') + '}, "total_equation": ' + JSON.stringify(fee.total_equation||'') + ', "tiers": tiers, "total_fee": None}\n');
+  }
+  L.push('ALL_FEE_CALCULATORS = {' + fees.map(f => '\n    ' + JSON.stringify(f.fee_name) + ': calculate_' + f.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')).join(',') + '\n}\n');
+  L.push('def get_all_equations():\n    return ' + JSON.stringify(fees, null, 2) + '\n');
+  L.push('def print_equation_summary():\n    fees = get_all_equations()\n    print("\\nCONTRACT FEE EQUATIONS\\nSources: ' + label.replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '\\n" + "="*70)\n    for i, f in enumerate(fees, 1):\n        print(f"\\n  {i}. {f[\'fee_name\']}  [{f[\'section_reference\']}]\\n     {f[\'description\']}")\n        print("\\n     VARIABLES:")\n        for k,v in f[\'variables\'].items(): print(f"       {k:<8} = {v}")\n        if len(f.get(\'tiers\',[])) > 1:\n            print("\\n     TIERS:")\n            for t in f[\'tiers\']: print(f"       [{t[\'tier_name\']}]\\n         Condition : {t[\'condition\']}\\n         Equation  : {t[\'equation\']}")\n        print(f"\\n     TOTAL EQUATION:\\n       {f[\'total_equation\']}")\n        if f.get(\'notes\'): print(f"\\n     NOTES: {f[\'notes\']}")\n        print("\\n  " + "-"*66)\n\nif __name__ == \'__main__\':\n    print_equation_summary()');
+  return L.join('\n');
+}
+
+// ── Render results ──
+function renderResults(fees, filenames) {
+  const docCount = Array.isArray(filenames) ? filenames.length : 1;
+  const tiered   = fees.filter(f => (f.tiers||[]).length > 1).length;
+  document.getElementById('summary-grid').innerHTML =
+    '<div class="metric-card"><div class="metric-label">Fee types found</div><div class="metric-value">' + fees.length + '</div></div>' +
+    '<div class="metric-card"><div class="metric-label">Tiered equations</div><div class="metric-value">' + tiered + '</div></div>' +
+    '<div class="metric-card"><div class="metric-label">Documents merged</div><div class="metric-value">' + docCount + '</div></div>';
+  const cont = document.getElementById('fee-cards');
+  cont.innerHTML = '';
+  fees.forEach(fee => {
+    const tiers = fee.tiers || [];
+    const vars  = fee.variables || {};
+    const card  = document.createElement('div');
+    card.className = 'fee-card';
+    const varsH = Object.keys(vars).length
+      ? '<div><div class="field-label">Variables</div><div class="var-list">'
+        + Object.entries(vars).map(([v,d]) => '<div class="var-row"><span class="var-sym">' + v + '</span><span class="var-def">' + d + '</span></div>').join('')
+        + '</div></div>' : '';
+    const tiersH = tiers.length
+      ? '<div><div class="field-label">Tiers (' + tiers.length + ')</div><div class="tier-grid">'
+        + tiers.map(t => '<div class="tier-item"><span class="tier-tag">' + (t.tier_name||'') + '</span><div class="tier-cond">' + (t.condition||'') + '</div><div class="tier-eq">' + (t.equation||'') + '</div></div>').join('')
+        + '</div></div>' : '';
+    card.innerHTML =
+      '<div class="fee-header" onclick="this.closest(\'.fee-card\').classList.toggle(\'open\')">'
+      + '<span class="fee-name">' + fee.fee_name + '</span>'
+      + '<div class="fee-meta"><span class="tag-section">' + (fee.section_reference||'') + '</span>'
+      + (tiers.length > 1 ? '<span class="tag-tiers">' + tiers.length + ' tiers</span>' : '')
+      + '<span class="chevron">&#9660;</span></div></div>'
+      + '<div class="fee-body"><div class="fee-inner">'
+      + '<div><div class="field-label">Description</div><div class="field-text">' + (fee.description||'') + '</div></div>'
+      + varsH + tiersH
+      + '<div><div class="field-label">Total equation</div><div class="total-eq">' + (fee.total_equation||'') + '</div></div>'
+      + (fee.notes ? '<div><div class="field-label">Notes</div><div class="notes-text">' + fee.notes + '</div></div>' : '')
+      + '</div></div>';
+    cont.appendChild(card);
+  });
+  if (fees.length) cont.firstChild.classList.add('open');
+}
+
+
 async function startAnalysis() {
   if (!fileList.length) return;
   const names = fileList.map(f => f.name);
