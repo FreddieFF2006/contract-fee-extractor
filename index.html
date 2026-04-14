@@ -306,11 +306,22 @@ function extractOneFile(file, docIdx, docTotal, onProgress) {
       }
       return chain.then(function(){
         var toOcr=[], skipped=[];
+        var scannedCount = pageData.filter(function(p){return p.scanned;}).length;
+        var fullyScanned = scannedCount === pageData.length;
         for (var j=0; j<pageData.length; j++) {
           if (!pageData[j].scanned) continue;
-          var nb = [pageData[j-2]?pageData[j-2].native:'', pageData[j-1]?pageData[j-1].native:'',
-                    pageData[j+1]?pageData[j+1].native:'', pageData[j+2]?pageData[j+2].native:''].join(' ');
-          if (looksFeeLike(nb)||looksFeeLike(pageData[j].native)) { toOcr.push(pageData[j]); }
+          var shouldOcr = false;
+          if (fullyScanned) {
+            // No neighbours have any text to check — OCR first 60% of pages
+            // (fee sections almost always appear in the first half of a contract)
+            var cutoff = Math.ceil(pdf.numPages * 0.60);
+            shouldOcr = pageData[j].pageNum > 1 && pageData[j].pageNum <= cutoff;
+          } else {
+            var nb = [pageData[j-2]?pageData[j-2].native:'', pageData[j-1]?pageData[j-1].native:'',
+                      pageData[j+1]?pageData[j+1].native:'', pageData[j+2]?pageData[j+2].native:''].join(' ');
+            shouldOcr = looksFeeLike(nb) || looksFeeLike(pageData[j].native);
+          }
+          if (shouldOcr) { toOcr.push(pageData[j]); }
           else { skipped.push(pageData[j].pageNum); }
         }
         var ocrMap={}, BATCH=3, ocrChain=Promise.resolve();
