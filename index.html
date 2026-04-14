@@ -587,16 +587,82 @@ document.addEventListener('drop', e => {
 });
 
 // ── PDF text extraction ──
-async function extractText(file) {
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let out = '';
+// Render a single PDF page to a base64 JPEG using a canvas
+async function renderPageToBase64(page, scale = 2.0) {
+  const viewport = page.getViewport({ scale });
+  const canvas   = document.createElement('canvas');
+  canvas.width   = viewport.width;
+  canvas.height  = viewport.height;
+  const ctx      = canvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  // Return base64 data only (strip the "data:image/jpeg;base64," prefix)
+  return canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+
+// OCR a single page image via the Claude API vision endpoint
+async function ocrPageWithClaude(base64img, pageNum, apiKey) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/jpeg', data: base64img }
+          },
+          {
+            type: 'text',
+            text: 'Transcribe all text from this document page exactly as it appears. Preserve numbers, symbols, table structure and layout as best you can using plain text. Output the raw transcription only, no commentary.'
+          }
+        ]
+      }]
+    })
+  });
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({}));
+    throw new Error('OCR API error ' + resp.status + ': ' + (e?.error?.message || resp.statusText));
+  }
+  const data = await resp.json();
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+}
+
+// Smart extraction: try native text first, fall back to OCR if page is blank/scanned
+async function extractText(file, onProgress) {
+  const apiKey  = sessionStorage.getItem('cf_api_key') || document.getElementById('api-key').value.trim();
+  const buf     = await file.arrayBuffer();
+  const pdf     = await pdfjsLib.getDocument({ data: buf }).promise;
+  let   out     = '';
+  let   ocrUsed = false;
+
   for (let i = 1; i <= pdf.numPages; i++) {
+    if (onProgress) onProgress(i, pdf.numPages);
     const page    = await pdf.getPage(i);
     const content = await page.getTextContent();
-    out += `[PAGE ${i}]\n` + content.items.map(x => x.str).join(' ') + '\n\n';
+    const native  = content.items.map(x => x.str).join(' ').trim();
+
+    if (native.length > 50) {
+      // Normal text-based PDF page
+      out += `[PAGE ${i}]\n` + native + '\n\n';
+    } else {
+      // Blank result = scanned image — use Claude vision OCR
+      ocrUsed = true;
+      if (onProgress) onProgress(i, pdf.numPages, true); // signal OCR mode
+      const base64 = await renderPageToBase64(page);
+      const text   = await ocrPageWithClaude(base64, i, apiKey);
+      out += `[PAGE ${i} — OCR]\n` + text + '\n\n';
+    }
   }
-  return out;
+
+  return { text: out, ocrUsed };
 }
 
 // ── Claude API call ──
@@ -781,14 +847,28 @@ function toggleCard(card) {
 // extractText is already defined above — used per-file below
 
 async function extractAllFiles(files) {
-  const parts = [];
+  const parts   = [];
+  let anyOcr    = false;
+
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    setStep('extract', 'active', `${i+1}/${files.length} — ${f.name}`);
-    const text = await extractText(f);
-    parts.push('='.repeat(60)+'\nDOCUMENT '+(i+1)+': '+f.name+'\n'+'='.repeat(60)+'\n\n'+text);
+
+    // Progress callback — updates the step detail in real time
+    const onProgress = (pageNum, totalPages, isOcr) => {
+      const ocrTag = isOcr ? ' (OCR)' : '';
+      setStep('extract', 'active',
+        `Doc ${i+1}/${files.length} — page ${pageNum}/${totalPages}${ocrTag} — ${f.name}`);
+    };
+
+    const { text, ocrUsed } = await extractText(f, onProgress);
+    if (ocrUsed) anyOcr = true;
+
+    parts.push('='.repeat(60) + '\nDOCUMENT ' + (i+1) + ': ' + f.name + '\n' + '='.repeat(60) + '\n\n' + text);
   }
-  setStep('extract', 'done', files.length+' file'+(files.length>1?'s':'')+' merged');
+
+  const ocrNote  = anyOcr ? ' (OCR used)' : '';
+  const fileNote = files.length + ' file' + (files.length > 1 ? 's' : '') + ' merged';
+  setStep('extract', 'done', fileNote + ocrNote);
   return parts.join('\n\n');
 }
 
