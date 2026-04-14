@@ -643,8 +643,7 @@ async function ocrPagesBatch(pages, startPageNum, apiKey) {
   }
 }
 
-// Smart extraction: native text first, OCR fallback for scanned pages
-// Groups scanned pages into batches of 5 to minimise API calls
+// Smart extraction: native text first, targeted OCR only on fee-relevant scanned pages
 async function extractText(file, onProgress) {
   const apiKey = sessionStorage.getItem('cf_api_key') || document.getElementById('api-key').value.trim();
   if (!apiKey) throw new Error('No API key found — please enter it above before uploading');
@@ -652,34 +651,72 @@ async function extractText(file, onProgress) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
-  const nativePages = []; // { pageNum, text }
-  const scanPages   = []; // { pageNum, page } — need OCR
+  // Keywords that suggest a page contains fee / payment information
+  const FEE_KEYWORDS = [
+    'fee', 'fees', 'royalt', 'payment', 'rate', 'rates', 'charge', 'charges',
+    'revenue', 'price', 'pricing', 'cost', 'costs', 'tariff', 'schedule',
+    'per user', 'per month', 'per play', 'subscription', 'tier', 'minimum',
+    'advance', 'recoup', 'percentage', '%', '$', '£', '€'
+  ];
 
-  // Pass 1: extract native text from all pages (fast)
+  function looksFeeLike(text) {
+    const lower = text.toLowerCase();
+    return FEE_KEYWORDS.some(k => lower.includes(k));
+  }
+
+  const nativePages  = []; // { pageNum, text }
+  const scanNative   = []; // scanned pages that neighbour a fee section (small sample for context)
+  const scanFeePages = []; // scanned pages most likely to contain fees — OCR these
+  const scanSkipped  = []; // scanned pages with no fee signal — skip OCR
+
+  // ── Pass 1: read all native text, flag scanned pages ──
+  const pageData = []; // { pageNum, native, isScanned }
   for (let i = 1; i <= pdf.numPages; i++) {
-    if (onProgress) onProgress(i, pdf.numPages, false, 'reading');
+    if (onProgress) onProgress(i, pdf.numPages, false, `reading page ${i}/${pdf.numPages}`);
     const page    = await pdf.getPage(i);
     const content = await page.getTextContent();
     const native  = content.items.map(x => x.str).join(' ').trim();
-    if (native.length > 50) {
-      nativePages.push({ pageNum: i, text: native });
+    pageData.push({ pageNum: i, page, native, isScanned: native.length <= 50 });
+  }
+
+  // ── Pass 2: for scanned pages, check neighbours for fee keywords ──
+  // If a scanned page is surrounded by text pages that mention fees,
+  // it's very likely a rate card or table — OCR it.
+  // Otherwise skip it to avoid timeout on large documents.
+  for (let i = 0; i < pageData.length; i++) {
+    const pd = pageData[i];
+    if (!pd.isScanned) {
+      nativePages.push({ pageNum: pd.pageNum, text: pd.native });
+      continue;
+    }
+
+    // Check surrounding text pages (±2 pages) for fee signals
+    const neighbours = [
+      pageData[i-2]?.native || '',
+      pageData[i-1]?.native || '',
+      pageData[i+1]?.native || '',
+      pageData[i+2]?.native || '',
+    ].join(' ');
+
+    if (looksFeeLike(neighbours) || looksFeeLike(pd.native)) {
+      scanFeePages.push(pd);
     } else {
-      scanPages.push({ pageNum: i, page });
+      scanSkipped.push(pd.pageNum);
     }
   }
 
-  // Pass 2: OCR scanned pages in batches of 5
-  const ocrResults = {}; // pageNum -> text
-  const BATCH = 5;
-  for (let b = 0; b < scanPages.length; b += BATCH) {
-    const batch     = scanPages.slice(b, b + BATCH);
+  // ── Pass 3: OCR only the fee-relevant scanned pages, in batches of 3 ──
+  const ocrResults = {};
+  const BATCH = 3;
+  for (let b = 0; b < scanFeePages.length; b += BATCH) {
+    const batch     = scanFeePages.slice(b, b + BATCH);
     const batchNums = batch.map(x => x.pageNum);
-    if (onProgress) onProgress(batchNums[0], pdf.numPages, true, `OCR pages ${batchNums.join(',')} of ${pdf.numPages}`);
+    if (onProgress) onProgress(batchNums[0], pdf.numPages, true,
+      `OCR page${batchNums.length > 1 ? 's' : ''} ${batchNums.join(',')} of ${pdf.numPages}`);
 
     const images  = await Promise.all(batch.map(x => renderPageToBase64(x.page)));
     const rawText = await ocrPagesBatch(images, batchNums[0], apiKey);
 
-    // Split response back into per-page chunks
     batch.forEach((item, idx) => {
       const marker  = `--- PAGE ${item.pageNum} ---`;
       const nextNum = batch[idx + 1]?.pageNum;
@@ -688,208 +725,33 @@ async function extractText(file, onProgress) {
       const end     = nextMk ? rawText.indexOf(nextMk) : rawText.length;
       ocrResults[item.pageNum] = start >= 0
         ? rawText.slice(start + marker.length, end > 0 ? end : undefined).trim()
-        : rawText; // fallback: use full response for single-page batches
+        : rawText;
     });
   }
 
-  // Assemble final text in page order
+  // ── Assemble final text in page order ──
   let out = '';
   for (let i = 1; i <= pdf.numPages; i++) {
     if (ocrResults[i] !== undefined) {
       out += `[PAGE ${i} — OCR]\n` + ocrResults[i] + '\n\n';
+    } else if (scanSkipped.includes(i)) {
+      out += `[PAGE ${i} — scanned, skipped (no fee content detected)]\n\n`;
     } else {
       const p = nativePages.find(x => x.pageNum === i);
       if (p) out += `[PAGE ${i}]\n` + p.text + '\n\n';
     }
   }
 
-  return { text: out, ocrUsed: scanPages.length > 0, scannedPages: scanPages.length };
+  const scannedPages = scanFeePages.length;
+  const skippedPages = scanSkipped.length;
+  return { text: out, ocrUsed: scannedPages > 0, scannedPages, skippedPages };
 }
 
-// ── Claude API call ──
-const SYSTEM = `You are a contract analysis specialist. Read this legal document and extract EVERY fee, charge, payment, royalty, or service fee calculation into a structured JSON format.
-
-For each fee type found, output an object with exactly these fields:
-- "fee_name": short human-readable name
-- "section_reference": the section/clause number (e.g. "Section 7(a)")
-- "description": 1-2 sentence plain-English summary
-- "variables": object where each key is a short variable symbol and value is its plain-English definition
-- "tiers": array of tier objects, each with "tier_name", "condition", and "equation" (algebraic, using your variable symbols)
-- "total_equation": complete combined algebraic equation using your variable symbols
-- "notes": special conditions, floors, caps, exceptions
-
-Return ONLY a valid JSON array. No markdown, no code fences. Pure JSON array only.`;
-
-async function callAPI(text) {
-  const key = sessionStorage.getItem('cf_api_key') || keyInput.value.trim();
-  if (!key) throw new Error('No API key. Please enter your Anthropic API key above.');
-
-  const truncated = text.length > 80000 ? text.slice(0, 80000) + '\n[truncated]' : text;
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      system: SYSTEM,
-      messages: [{ role: 'user', content: 'Extract all fee calculation sections from this contract into the JSON format specified.\n\nDOCUMENT:\n' + truncated }]
-    })
-  });
-
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(`API error ${resp.status}: ${err?.error?.message || resp.statusText}`);
-  }
-
-  const data = await resp.json();
-  let raw = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
-  return JSON.parse(raw);
-}
-
-// ── Python module generator ──
-function generateModule(fees, filenames) {
-  const filename = Array.isArray(filenames) ? filenames[0] : filenames;
-  const allNames = Array.isArray(filenames) ? filenames : [filenames];
-  const lines = [];
-  const stem = filename.replace(/\.pdf$/i, '').replace(/\s+/g, '_');
-  const today = new Date().toISOString().slice(0, 10);
-
-  lines.push(`"""
-Auto-generated Fee Calculator
-Source : ${filename}
-Date   : ${today}
-
-Usage:
-    from ${stem}_fee_equations import print_equation_summary, get_all_equations
-    print_equation_summary()
-"""`);
-  lines.push('from __future__ import annotations\n');
-
-  for (const fee of fees) {
-    const fn = 'calculate_' + fee.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-    const params = Object.keys(fee.variables || {});
-    const paramStr = params.length ? params.map(p => `${p}: float`).join(', ') : '**kwargs';
-
-    lines.push(`# ${'─'.repeat(66)}`);
-    lines.push(`# ${fee.fee_name}  [${fee.section_reference}]`);
-    lines.push(`# ${'─'.repeat(66)}\n`);
-    lines.push(`def ${fn}(${paramStr}) -> dict:`);
-    lines.push(`    """`);
-    lines.push(`    ${fee.fee_name}  [${fee.section_reference}]\n`);
-    lines.push(`    DESCRIPTION\n    ${'─'.repeat(40)}`);
-    lines.push(`    ${fee.description || ''}\n`);
-    lines.push(`    VARIABLES\n    ${'─'.repeat(40)}`);
-    for (const [v,d] of Object.entries(fee.variables || {})) {
-      lines.push(`    ${v.padEnd(8)}: ${d}`);
-    }
-    lines.push('');
-    const tiers = fee.tiers || [];
-    if (tiers.length > 1) {
-      lines.push(`    TIERS\n    ${'─'.repeat(40)}`);
-      for (const t of tiers) {
-        lines.push(`    [${t.tier_name}]`);
-        lines.push(`      Condition : ${t.condition}`);
-        lines.push(`      Equation  : ${t.equation}\n`);
-      }
-    }
-    lines.push(`    TOTAL EQUATION\n    ${'─'.repeat(40)}`);
-    lines.push(`    ${fee.total_equation || ''}\n`);
-    if (fee.notes) {
-      lines.push(`    NOTES\n    ${'─'.repeat(40)}`);
-      lines.push(`    ${fee.notes}\n`);
-    }
-    lines.push(`    """`);
-    lines.push(`    tiers = []`);
-    for (const t of tiers) {
-      lines.push(`    tiers.append({"tier_name": ${JSON.stringify(t.tier_name)}, "condition": ${JSON.stringify(t.condition)}, "equation": ${JSON.stringify(t.equation)}, "fee": None})`);
-    }
-    lines.push(`    return {"fee_name": ${JSON.stringify(fee.fee_name)}, "section": ${JSON.stringify(fee.section_reference)}, "inputs": {${params.map(p=>`"${p}": ${p}`).join(', ')}}, "total_equation": ${JSON.stringify(fee.total_equation||'')}, "tiers": tiers, "total_fee": None}\n\n`);
-  }
-
-  lines.push(`ALL_FEE_CALCULATORS = {${fees.map(f => `\n    ${JSON.stringify(f.fee_name)}: ${'calculate_'+f.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}`).join(',')}\n}\n`);
-
-  lines.push(`def get_all_equations() -> list:\n    """Return all extracted fee metadata as a list of dicts."""\n    return ${JSON.stringify(fees, null, 4)}\n`);
-
-  lines.push(`def print_equation_summary() -> None:\n    """Pretty-print all equations to stdout."""\n    fees = get_all_equations()\n    print(f"\\nCONTRACT FEE EQUATIONS — ${filename}\\n" + "="*70)\n    for i, f in enumerate(fees, 1):\n        print(f"\\n  {i}. {f['fee_name']}  [{f['section_reference']}]")\n        print(f"     {f['description']}")\n        print("\\n     VARIABLES:")\n        for k,v in f['variables'].items(): print(f"       {k:<8} = {v}")\n        if len(f.get('tiers',[])) > 1:\n            print("\\n     TIERS:")\n            for t in f['tiers']: print(f"       [{t['tier_name']}]\\n         Condition : {t['condition']}\\n         Equation  : {t['equation']}")\n        print(f"\\n     TOTAL EQUATION:\\n       {f['total_equation']}")\n        if f.get('notes'): print(f"\\n     NOTES: {f['notes']}")\n        print("\\n  " + "-"*66)\n\nif __name__ == '__main__':\n    print_equation_summary()`);
-
-  return lines.join('\n');
-}
-
-// ── Render results ──
-function renderResults(fees, filenames) {
-  const tiered = fees.filter(f => (f.tiers||[]).length > 1).length;
-  document.getElementById('summary-grid').innerHTML = `
-    <div class="metric-card"><div class="metric-label">Fee types found</div><div class="metric-value">${fees.length}</div></div>
-    <div class="metric-card"><div class="metric-label">Tiered equations</div><div class="metric-value">${tiered}</div></div>
-    <div class="metric-card"><div class="metric-label">Documents merged</div><div class="metric-value">${Array.isArray(filenames) ? filenames.length : 1}</div></div>
-  `;
-
-  const container = document.getElementById('fee-cards');
-  container.innerHTML = '';
-  fees.forEach((fee, idx) => {
-    const tiers = fee.tiers || [];
-    const vars  = fee.variables || {};
-    const card  = document.createElement('div');
-    card.className = 'fee-card';
-
-    const varsHtml = Object.keys(vars).length ? `
-      <div>
-        <div class="field-label">Variables</div>
-        <div class="var-list">${Object.entries(vars).map(([v,d]) => `<div class="var-row"><span class="var-sym">${v}</span><span class="var-def">${d}</span></div>`).join('')}</div>
-      </div>` : '';
-
-    const tiersHtml = tiers.length ? `
-      <div>
-        <div class="field-label">Tiers (${tiers.length})</div>
-        <div class="tier-grid">${tiers.map(t => `
-          <div class="tier-item">
-            <div class="tier-name-row"><span class="tier-tag">${t.tier_name||''}</span></div>
-            <div class="tier-cond">${t.condition||''}</div>
-            <div class="tier-eq">${t.equation||''}</div>
-          </div>`).join('')}
-        </div>
-      </div>` : '';
-
-    card.innerHTML = `
-      <div class="fee-header" onclick="toggleCard(this.closest('.fee-card'))">
-        <span class="fee-name">${fee.fee_name}</span>
-        <div class="fee-meta">
-          <span class="fee-section">${fee.section_reference||''}</span>
-          ${tiers.length > 1 ? `<span class="fee-tier-count">${tiers.length} tiers</span>` : ''}
-          <span class="fee-chevron">▼</span>
-        </div>
-      </div>
-      <div class="fee-body">
-        <div class="fee-body-inner">
-          <div><div class="field-label">Description</div><div class="field-text">${fee.description||''}</div></div>
-          ${varsHtml}
-          ${tiersHtml}
-          <div><div class="field-label">Total equation</div><div class="total-eq">${fee.total_equation||''}</div></div>
-          ${fee.notes ? `<div><div class="field-label">Notes</div><div class="notes-text">${fee.notes}</div></div>` : ''}
-        </div>
-      </div>`;
-    container.appendChild(card);
-  });
-
-  if (fees.length > 0) toggleCard(container.firstChild);
-}
-
-function toggleCard(card) {
-  card.classList.toggle('expanded');
-}
-
-// ── Main pipeline ──
-// extractText is already defined above — used per-file below
 
 async function extractAllFiles(files) {
   const parts = [];
   let totalScanned = 0;
+  let totalSkipped = 0;
 
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
@@ -910,12 +772,14 @@ async function extractAllFiles(files) {
     }
 
     totalScanned += result.scannedPages || 0;
+    totalSkipped += result.skippedPages || 0;
     parts.push('='.repeat(60) + '\nDOCUMENT ' + (i+1) + ': ' + f.name + '\n' + '='.repeat(60) + '\n\n' + result.text);
   }
 
-  const fileNote = files.length + ' file' + (files.length > 1 ? 's' : '') + ' merged';
-  const ocrNote  = totalScanned > 0 ? ` · ${totalScanned} scanned page${totalScanned > 1 ? 's' : ''} OCR’d` : '';
-  setStep('extract', 'done', fileNote + ocrNote);
+  const fileNote    = files.length + ' file' + (files.length > 1 ? 's' : '') + ' merged';
+  const ocrNote     = totalScanned > 0 ? ` · ${totalScanned} page${totalScanned > 1 ? 's' : ''} OCR’d` : '';
+  const skipNote    = totalSkipped > 0 ? ` · ${totalSkipped} non-fee scanned page${totalSkipped > 1 ? 's' : ''} skipped` : '';
+  setStep('extract', 'done', fileNote + ocrNote + skipNote);
   return parts.join('\n\n');
 }
 
