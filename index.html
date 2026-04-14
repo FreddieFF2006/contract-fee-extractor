@@ -5,960 +5,507 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Contract Fee Extractor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
-:root {
-  --bg: #0e0e0f;
-  --surface: #161618;
-  --surface2: #1e1e21;
-  --border: rgba(255,255,255,0.08);
-  --border2: rgba(255,255,255,0.14);
-  --text: #f0eff0;
-  --muted: #8a8896;
-  --accent: #7b6ef6;
-  --accent2: #a78bfa;
-  --green: #34d399;
-  --red: #f87171;
-  --yellow: #fbbf24;
-  --mono: 'DM Mono', monospace;
-  --sans: 'DM Sans', sans-serif;
-}
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; scroll-behavior: smooth; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
-  font-weight: 300;
-  line-height: 1.6;
-  min-height: 100vh;
-}
-
-/* Grid noise texture overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='none'/%3E%3Cpath d='M0 0h1v1H0z' fill='rgba(255,255,255,0.012)'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* ── Layout ── */
-.container { max-width: 760px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
-
-/* ── Header ── */
-header {
-  padding: 72px 0 56px;
-  border-bottom: 1px solid var(--border);
-}
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent2);
-  background: rgba(123,110,246,0.1);
-  border: 1px solid rgba(123,110,246,0.25);
-  border-radius: 4px;
-  padding: 4px 10px;
-  margin-bottom: 20px;
-}
-.badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: blink 2s infinite; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-h1 {
-  font-family: var(--mono);
-  font-size: clamp(26px, 4vw, 38px);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  color: var(--text);
-  margin-bottom: 14px;
-}
-h1 span { color: var(--accent2); }
-
-.tagline {
-  font-size: 15px;
-  color: var(--muted);
-  max-width: 500px;
-  line-height: 1.7;
-}
-
-/* ── API Key section ── */
-.section { padding: 36px 0; border-bottom: 1px solid var(--border); }
-.section-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-.input-row { display: flex; gap: 10px; align-items: stretch; }
-.key-input {
-  flex: 1;
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--text);
-  outline: none;
-  transition: border-color 0.2s;
-}
-.key-input:focus { border-color: var(--accent); }
-.key-input::placeholder { color: var(--muted); }
-.btn-save {
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 400;
-  color: #fff;
-  cursor: pointer;
-  transition: opacity 0.2s;
-  white-space: nowrap;
-}
-.btn-save:hover { opacity: 0.85; }
-.key-hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
-.key-hint a { color: var(--accent2); text-decoration: none; }
-.key-hint a:hover { text-decoration: underline; }
-
-/* ── Drop zone ── */
-.drop-zone {
-  border: 1.5px dashed var(--border2);
-  border-radius: 12px;
-  padding: 40px 24px;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-  background: var(--surface);
-  position: relative;
-  overflow: hidden;
-}
-.drop-zone::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at 50% 0%, rgba(123,110,246,0.06) 0%, transparent 70%);
-  pointer-events: none;
-}
-.drop-zone:hover, .drop-zone.active {
-  border-color: var(--accent);
-  background: var(--surface2);
-}
-.drop-icon {
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 16px;
-  background: var(--surface2);
-  border: 1px solid var(--border2);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-}
-.drop-title { font-size: 15px; font-weight: 400; color: var(--text); margin-bottom: 6px; }
-.drop-sub { font-size: 13px; color: var(--muted); }
-.drop-sub strong { color: var(--accent2); font-weight: 400; }
-#file-input { display: none; }
-
-/* ── Progress ── */
-.progress { display: none; padding: 20px 0; }
-.progress.visible { display: block; }
-.step-list { list-style: none; display: flex; flex-direction: column; gap: 0; }
-.step-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  font-size: 13px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-  transition: color 0.3s;
-}
-.step-item:last-child { border-bottom: none; }
-.step-item.active { color: var(--text); }
-.step-item.done { color: var(--green); }
-.step-marker {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--border2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--mono);
-  font-size: 10px;
-  flex-shrink: 0;
-  transition: all 0.3s;
-}
-.step-item.active .step-marker {
-  border-color: var(--accent);
-  background: rgba(123,110,246,0.15);
-  animation: stepPulse 1.2s infinite;
-}
-.step-item.done .step-marker {
-  border-color: var(--green);
-  background: rgba(52,211,153,0.12);
-  color: var(--green);
-}
-@keyframes stepPulse { 0%,100%{box-shadow:0 0 0 0 rgba(123,110,246,0.3)} 50%{box-shadow:0 0 0 6px rgba(123,110,246,0)} }
-
-/* ── Status message ── */
-.status-msg {
-  display: none;
-  font-family: var(--mono);
-  font-size: 12px;
-  padding: 10px 14px;
-  border-radius: 6px;
-  margin: 12px 0;
-  border-left: 2px solid;
-}
-.status-msg.info { display: block; color: var(--accent2); background: rgba(123,110,246,0.08); border-color: var(--accent); }
-.status-msg.error { display: block; color: var(--red); background: rgba(248,113,113,0.08); border-color: var(--red); }
-.status-msg.success { display: block; color: var(--green); background: rgba(52,211,153,0.08); border-color: var(--green); }
-
-/* ── Results ── */
-.results { display: none; }
-.results.visible { display: block; padding: 36px 0; }
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 28px;
-}
-.metric-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-}
-.metric-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.metric-value { font-family: var(--mono); font-size: 28px; font-weight: 500; color: var(--text); }
-
-.results-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 12px;
-}
-
-/* ── Fee cards ── */
-.fee-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 8px;
-  overflow: hidden;
-  transition: border-color 0.2s;
-}
-.fee-card:hover { border-color: var(--border2); }
-.fee-card.expanded { border-color: rgba(123,110,246,0.3); }
-
-.fee-header {
-  padding: 14px 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  user-select: none;
-}
-.fee-name { font-size: 13px; font-weight: 400; color: var(--text); }
-.fee-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.fee-section {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--accent2);
-  background: rgba(123,110,246,0.1);
-  border: 1px solid rgba(123,110,246,0.2);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.fee-tier-count {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-.fee-chevron { color: var(--muted); font-size: 10px; transition: transform 0.2s; }
-.fee-card.expanded .fee-chevron { transform: rotate(180deg); color: var(--accent2); }
-
-.fee-body { display: none; border-top: 1px solid var(--border); }
-.fee-card.expanded .fee-body { display: block; }
-.fee-body-inner { padding: 18px; display: grid; gap: 18px; }
-
-.field-label {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-.field-text { font-size: 13px; color: var(--muted); line-height: 1.65; }
-
-.var-list { display: flex; flex-direction: column; gap: 4px; }
-.var-row { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
-.var-sym { font-family: var(--mono); font-size: 12px; color: var(--accent2); min-width: 50px; flex-shrink: 0; }
-.var-def { color: var(--muted); }
-
-.tier-grid { display: flex; flex-direction: column; gap: 8px; }
-.tier-item {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-.tier-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.tier-tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  background: rgba(123,110,246,0.1);
-  color: var(--accent2);
-  padding: 2px 7px;
-  border-radius: 3px;
-}
-.tier-cond { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-.tier-eq {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  word-break: break-all;
-  line-height: 1.6;
-}
-
-.total-eq {
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--text);
-  background: rgba(123,110,246,0.06);
-  border: 1px solid rgba(123,110,246,0.2);
-  border-radius: 8px;
-  padding: 14px 16px;
-  word-break: break-all;
-  line-height: 1.7;
-}
-
-.notes-text { font-size: 12px; color: var(--muted); font-style: italic; line-height: 1.7; }
-
-/* ── Buttons ── */
-.btn-row { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 400;
-  cursor: pointer;
-  transition: opacity 0.2s, transform 0.1s;
-  border: none;
-  text-decoration: none;
-}
-.btn:active { transform: scale(0.98); }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { opacity: 0.88; }
-.btn-outline {
-  background: transparent;
-  border: 1px solid var(--border2);
-  color: var(--text);
-}
-.btn-outline:hover { background: var(--surface2); }
-.btn-green { background: rgba(52,211,153,0.15); color: var(--green); border: 1px solid rgba(52,211,153,0.25); }
-.btn-green:hover { background: rgba(52,211,153,0.22); }
-
-/* ── Footer ── */
-footer {
-  padding: 40px 0 60px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: gap;
-  gap: 16px;
-}
-.footer-note { font-size: 12px; color: var(--muted); }
-.footer-mono { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+:root{--bg:#0e0e0f;--surface:#161618;--surface2:#1e1e21;--border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);--text:#f0eff0;--muted:#8a8896;--accent:#7b6ef6;--accent2:#a78bfa;--green:#34d399;--red:#f87171;--mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-weight:300;line-height:1.6;min-height:100vh}
+.container{max-width:760px;margin:0 auto;padding:0 24px}
+header{padding:72px 0 56px;border-bottom:1px solid var(--border)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent2);background:rgba(123,110,246,.1);border:1px solid rgba(123,110,246,.25);border-radius:4px;padding:4px 10px;margin-bottom:20px}
+.badge-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+h1{font-family:var(--mono);font-size:clamp(26px,4vw,38px);font-weight:500;letter-spacing:-.02em;line-height:1.2;margin-bottom:14px}
+h1 span{color:var(--accent2)}
+.tagline{font-size:15px;color:var(--muted);max-width:520px;line-height:1.7}
+.section{padding:36px 0;border-bottom:1px solid var(--border)}
+.section-title{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.input-row{display:flex;gap:10px}
+.key-input{flex:1;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:13px;color:var(--text);outline:none;transition:border-color .2s}
+.key-input:focus{border-color:var(--accent)}
+.key-input::placeholder{color:var(--muted)}
+.btn-save{background:var(--accent);border:none;border-radius:8px;padding:10px 18px;font-family:var(--sans);font-size:13px;color:#fff;cursor:pointer}
+.btn-save:hover{opacity:.85}
+.key-hint{font-size:12px;color:var(--muted);margin-top:8px}
+.key-hint a{color:var(--accent2);text-decoration:none}
+.drop-zone{border:1.5px dashed var(--border2);border-radius:12px;padding:36px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:var(--surface)}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:var(--surface2)}
+.drop-icon{width:48px;height:48px;margin:0 auto 14px;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px}
+.drop-title{font-size:15px;color:var(--text);margin-bottom:6px}
+.drop-sub{font-size:13px;color:var(--muted)}
+.drop-sub strong{color:var(--accent2);font-weight:400}
+#file-input{display:none}
+.file-queue{margin-top:14px;display:none;flex-direction:column;gap:6px}
+.file-queue.has-files{display:flex}
+.file-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px}
+.file-left{display:flex;align-items:center;gap:10px;min-width:0}
+.file-name{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}
+.file-size{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.file-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.file-badge{font-family:var(--mono);font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:4px;padding:2px 7px}
+.file-remove{width:22px;height:22px;border-radius:50%;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;line-height:1}
+.file-remove:hover{background:rgba(248,113,113,.12);color:var(--red);border-color:rgba(248,113,113,.3)}
+.queue-footer{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.queue-count{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.btn-add{font-family:var(--sans);font-size:12px;color:var(--accent2);background:transparent;border:1px solid rgba(123,110,246,.25);border-radius:6px;padding:5px 12px;cursor:pointer}
+.btn-add:hover{background:rgba(123,110,246,.1)}
+.btn-analyse{width:100%;margin-top:14px;padding:13px;background:var(--accent);border:none;border-radius:10px;font-family:var(--sans);font-size:14px;color:#fff;cursor:pointer;transition:opacity .2s;opacity:.35}
+.btn-analyse:hover:not([disabled]){opacity:.88}
+.status-msg{display:none;font-family:var(--mono);font-size:12px;padding:10px 14px;border-radius:6px;margin:12px 0;border-left:2px solid}
+.status-msg.info{display:block;color:var(--accent2);background:rgba(123,110,246,.08);border-color:var(--accent)}
+.status-msg.error{display:block;color:var(--red);background:rgba(248,113,113,.08);border-color:var(--red)}
+.status-msg.success{display:block;color:var(--green);background:rgba(52,211,153,.08);border-color:var(--green)}
+.progress{display:none;padding:20px 0}
+.progress.visible{display:block}
+.step-list{list-style:none}
+.step-item{display:flex;align-items:center;gap:12px;padding:12px 0;font-size:13px;color:var(--muted);border-bottom:1px solid var(--border);transition:color .3s}
+.step-item:last-child{border-bottom:none}
+.step-item.active{color:var(--text)}
+.step-item.done{color:var(--green)}
+.step-marker{width:24px;height:24px;border-radius:50%;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;flex-shrink:0;transition:all .3s}
+.step-item.active .step-marker{border-color:var(--accent);background:rgba(123,110,246,.15);animation:pulse 1.2s infinite}
+.step-item.done .step-marker{border-color:var(--green);background:rgba(52,211,153,.12);color:var(--green)}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(123,110,246,.3)}50%{box-shadow:0 0 0 6px rgba(123,110,246,0)}}
+.step-detail{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto;max-width:280px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.results{display:none;padding:36px 0}
+.results.visible{display:block}
+.summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:28px}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.metric-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.metric-value{font-family:var(--mono);font-size:28px;font-weight:500}
+.results-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.fee-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;transition:border-color .2s}
+.fee-card:hover{border-color:var(--border2)}
+.fee-card.open{border-color:rgba(123,110,246,.3)}
+.fee-header{padding:14px 18px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none}
+.fee-name{font-size:13px;color:var(--text)}
+.fee-meta{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tag-section{font-family:var(--mono);font-size:11px;color:var(--accent2);background:rgba(123,110,246,.1);border:1px solid rgba(123,110,246,.2);padding:2px 8px;border-radius:4px}
+.tag-tiers{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.chevron{color:var(--muted);font-size:10px;transition:transform .2s}
+.fee-card.open .chevron{transform:rotate(180deg);color:var(--accent2)}
+.fee-body{display:none;border-top:1px solid var(--border)}
+.fee-card.open .fee-body{display:block}
+.fee-inner{padding:18px;display:grid;gap:16px}
+.field-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.field-text{font-size:13px;color:var(--muted);line-height:1.65}
+.var-list{display:flex;flex-direction:column;gap:4px}
+.var-row{display:flex;gap:10px;font-size:13px}
+.var-sym{font-family:var(--mono);font-size:12px;color:var(--accent2);min-width:55px;flex-shrink:0}
+.var-def{color:var(--muted)}
+.tier-grid{display:flex;flex-direction:column;gap:8px}
+.tier-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+.tier-tag{font-family:var(--mono);font-size:10px;background:rgba(123,110,246,.1);color:var(--accent2);padding:2px 7px;border-radius:3px;display:inline-block;margin-bottom:6px}
+.tier-cond{font-size:12px;color:var(--muted);margin-bottom:8px}
+.tier-eq{font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;word-break:break-all;line-height:1.6}
+.total-eq{font-family:var(--mono);font-size:13px;background:rgba(123,110,246,.06);border:1px solid rgba(123,110,246,.2);border-radius:8px;padding:14px 16px;word-break:break-all;line-height:1.7}
+.notes-text{font-size:12px;color:var(--muted);font-style:italic;line-height:1.7}
+.btn-row{display:flex;gap:10px;margin-top:28px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;font-family:var(--sans);font-size:13px;cursor:pointer;border:none}
+.btn-green{background:rgba(52,211,153,.15);color:var(--green);border:1px solid rgba(52,211,153,.25)}
+.btn-green:hover{background:rgba(52,211,153,.22)}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text)}
+.btn-outline:hover{background:var(--surface2)}
+footer{padding:40px 0 60px;border-top:1px solid var(--border);display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.footer-note,.footer-mono{font-size:12px;color:var(--muted)}
+.footer-mono{font-family:var(--mono);font-size:11px}
 </style>
 </head>
 <body>
-
 <div class="container">
-
-  <!-- ── Header ── -->
-  <header>
-    <div class="badge"><span class="badge-dot"></span>AI-powered · Claude API</div>
-    <h1>Contract Fee<br/><span>Equation Extractor</span></h1>
-    <p class="tagline">Upload one or more related contract PDFs — framework agreements, service schedules, annexes. The tool merges them and extracts every fee equation across the whole package.</p>
-  </header>
-
-  <!-- ── API Key ── -->
-  <div class="section" id="key-section">
-    <div class="section-title">Anthropic API Key</div>
-    <div class="input-row">
-      <input type="password" class="key-input" id="api-key" placeholder="sk-ant-api03-..." autocomplete="off"/>
-      <button class="btn-save" onclick="saveKey()">Save</button>
-    </div>
-    <p class="key-hint">Your key is stored in sessionStorage — never sent anywhere except directly to Anthropic. Get one at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>.</p>
-    <div class="status-msg" id="key-status"></div>
+<header>
+  <div class="badge"><span class="badge-dot"></span>AI-powered &middot; Claude API</div>
+  <h1>Contract Fee<br/><span>Equation Extractor</span></h1>
+  <p class="tagline">Upload one or more related contract PDFs. The tool merges them, extracts every fee equation, and generates a Python module. Scanned PDFs supported.</p>
+</header>
+<div class="section">
+  <div class="section-title">Anthropic API Key</div>
+  <div class="input-row">
+    <input type="password" class="key-input" id="api-key" placeholder="sk-ant-api03-..." autocomplete="off"/>
+    <button class="btn-save" onclick="saveKey()">Save</button>
   </div>
-
-  <!-- ── Upload ── -->
-  <div class="section">
-    <div class="section-title">Contract Documents</div>
-    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
-      <div class="drop-icon">📂</div>
-      <div class="drop-title">Drop PDFs here, or click to browse</div>
-      <div class="drop-sub">Add all related files — framework agreement, schedules, annexes<br/><strong>Multiple PDFs are merged and analysed together</strong></div>
-      <input type="file" id="file-input" accept=".pdf" multiple/>
-    </div>
-
-    <!-- File queue (shown after files added) -->
-    <div id="file-queue" style="display:none;flex-direction:column;gap:6px;margin-top:14px">
-      <div id="file-list"></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <span id="queue-count" style="font-family:var(--mono);font-size:12px;color:var(--muted)"></span>
-        <button onclick="document.getElementById('file-input').click()" style="font-family:var(--sans);font-size:12px;color:var(--accent2);background:transparent;border:1px solid rgba(123,110,246,.25);border-radius:6px;padding:5px 12px;cursor:pointer">+ Add more files</button>
-      </div>
-    </div>
-    <button id="btn-analyse" onclick="startAnalysis()" disabled style="width:100%;margin-top:14px;padding:13px;background:var(--accent);border:none;border-radius:10px;font-family:var(--sans);font-size:14px;color:#fff;cursor:pointer;opacity:.3">Analyse documents</button>
-    <div class="status-msg" id="upload-status"></div>
-  </div>
-
-  <!-- ── Progress ── -->
-  <div class="progress" id="progress">
-    <ul class="step-list">
-      <li class="step-item" id="step-extract">
-        <div class="step-marker" id="dot-extract">1</div>
-        <span>Extracting text from PDF</span>
-      </li>
-      <li class="step-item" id="step-api">
-        <div class="step-marker" id="dot-api">2</div>
-        <span>Analysing fee sections with Claude API</span>
-      </li>
-      <li class="step-item" id="step-gen">
-        <div class="step-marker" id="dot-gen">3</div>
-        <span>Generating Python equations module</span>
-      </li>
-    </ul>
-  </div>
-
-  <!-- ── Results ── -->
-  <div class="results" id="results">
-    <div class="summary-grid" id="summary-grid"></div>
-    <div class="results-title">Fee equations extracted</div>
-    <div id="fee-cards"></div>
-    <div class="btn-row">
-      <button class="btn btn-green" id="btn-dl">⬇ Download Python module</button>
-      <button class="btn btn-outline" onclick="resetTool()">↩ Analyse another set</button>
-    </div>
-  </div>
-
-  <!-- ── Footer ── -->
-  <footer>
-    <span class="footer-note">Powered by Claude API · PDF.js · Runs entirely in your browser</span>
-    <span class="footer-mono">contract-fee-extractor</span>
-  </footer>
-
+  <p class="key-hint">Session only &mdash; sent directly to Anthropic. Get one at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>.</p>
+  <div class="status-msg" id="key-status"></div>
 </div>
-
-<!-- PDF.js -->
+<div class="section" id="upload-section">
+  <div class="section-title">Contract Documents</div>
+  <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <div class="drop-icon">&#128194;</div>
+    <div class="drop-title">Drop PDFs here, or click to browse</div>
+    <div class="drop-sub">Framework agreements, schedules, annexes &mdash; <strong>multiple PDFs merged together</strong></div>
+    <input type="file" id="file-input" accept=".pdf" multiple/>
+  </div>
+  <div class="file-queue" id="file-queue">
+    <div id="file-list"></div>
+    <div class="queue-footer">
+      <span class="queue-count" id="queue-count"></span>
+      <button class="btn-add" onclick="document.getElementById('file-input').click()">+ Add more</button>
+    </div>
+  </div>
+  <button class="btn-analyse" id="btn-analyse" onclick="startAnalysis()" disabled>Analyse documents</button>
+  <div class="status-msg" id="upload-status"></div>
+</div>
+<div class="progress" id="progress">
+  <ul class="step-list">
+    <li class="step-item" id="step-extract"><div class="step-marker" id="dot-extract">1</div><span>Extracting text from PDFs</span><span class="step-detail" id="detail-extract"></span></li>
+    <li class="step-item" id="step-api"><div class="step-marker" id="dot-api">2</div><span>Analysing fee sections with Claude API</span><span class="step-detail" id="detail-api"></span></li>
+    <li class="step-item" id="step-gen"><div class="step-marker" id="dot-gen">3</div><span>Generating Python module</span><span class="step-detail" id="detail-gen"></span></li>
+  </ul>
+</div>
+<div class="results" id="results">
+  <div class="summary-grid" id="summary-grid"></div>
+  <div class="results-title">Fee equations extracted</div>
+  <div id="fee-cards"></div>
+  <div class="btn-row">
+    <button class="btn btn-green" id="btn-dl">&#11015; Download Python module</button>
+    <button class="btn btn-outline" onclick="resetTool()">&#8617; Start over</button>
+  </div>
+</div>
+<footer>
+  <span class="footer-note">Claude API &middot; PDF.js &middot; Runs in your browser</span>
+  <span class="footer-mono">contract-fee-extractor</span>
+</footer>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// ── State ──
-let fileList      = [];
-let generatedCode = '';
+var fileList = [];
+var generatedCode = '';
 
-// ── API key persistence ──
-const keyInput = document.getElementById('api-key');
-const saved = sessionStorage.getItem('cf_api_key');
-if (saved) { keyInput.value = saved; showKeyStatus('Key loaded from session.', 'success'); }
+// ── API KEY ──────────────────────────────────
+var keyEl = document.getElementById('api-key');
+var savedKey = sessionStorage.getItem('cf_api_key');
+if (savedKey) { keyEl.value = savedKey; showMsg('key-status','Key loaded.','success'); }
+
+function getKey() { return sessionStorage.getItem('cf_api_key') || keyEl.value.trim(); }
 
 function saveKey() {
-  const v = keyInput.value.trim();
-  if (!v.startsWith('sk-ant-')) {
-    showKeyStatus('That doesn\'t look like an Anthropic key (should start with sk-ant-).', 'error');
-    return;
-  }
+  var v = keyEl.value.trim();
+  if (!v.startsWith('sk-ant-')) { showMsg('key-status','Should start with sk-ant-','error'); return; }
   sessionStorage.setItem('cf_api_key', v);
-  showKeyStatus('Key saved for this session.', 'success');
+  showMsg('key-status','Saved for this session.','success');
 }
 
-function showKeyStatus(msg, type) {
-  const el = document.getElementById('key-status');
-  el.textContent = msg;
+// ── HELPERS ──────────────────────────────────
+function showMsg(id, text, type) {
+  var el = document.getElementById(id);
+  el.textContent = text;
   el.className = 'status-msg ' + type;
 }
 
-function setStatus(id, msg, type) {
-  const el = document.getElementById(id);
-  el.textContent = msg;
-  el.className = 'status-msg ' + type;
+function setStep(id, state, detail) {
+  document.getElementById('step-'+id).className = 'step-item ' + state;
+  var nums = {extract:'1',api:'2',gen:'3'};
+  document.getElementById('dot-'+id).textContent = state === 'done' ? '\u2713' : nums[id];
+  document.getElementById('detail-'+id).textContent = detail || '';
 }
 
-function setStep(id, state) {
-  const step = document.getElementById('step-' + id);
-  const dot  = document.getElementById('dot-'  + id);
-  step.className = 'step-item ' + state;
-  dot.textContent = state === 'done' ? '✓' : { extract: '1', api: '2', gen: '3' }[id];
-}
+function fmtBytes(b) { return b < 1048576 ? Math.round(b/1024)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 
-// ── File handlers ──
-function fmtBytes(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB';}
-
+// ── FILE QUEUE ────────────────────────────────
 function addFiles(files) {
-  let added = 0;
-  for (const f of files) {
+  var added = 0;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
     if (!f.name.toLowerCase().endsWith('.pdf')) continue;
-    if (fileList.some(x => x.name === f.name && x.size === f.size)) continue;
+    if (fileList.some(function(x){ return x.name===f.name && x.size===f.size; })) continue;
     fileList.push(f); added++;
   }
   if (added) renderQueue();
 }
 
-function removeFile(i) { fileList.splice(i, 1); renderQueue(); }
+function removeFile(i) { fileList.splice(i,1); renderQueue(); }
 
 function renderQueue() {
-  const q   = document.getElementById('file-queue');
-  const dz  = document.getElementById('drop-zone');
-  const btn = document.getElementById('btn-analyse');
-  if (!fileList.length) { q.style.display='none'; dz.style.display=''; btn.disabled=true; btn.style.opacity='.3'; return; }
-  dz.style.display = 'none';
-  q.style.display  = 'flex';
-  btn.disabled = false; btn.style.opacity = '1';
-  document.getElementById('file-list').innerHTML = fileList.map((f, i) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:6px">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0">
-        <span>&#128196;</span>
-        <div>
-          <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px" title="${f.name}">${f.name}</div>
-          <div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${fmtBytes(f.size)}</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-        <span style="font-family:var(--mono);font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:4px;padding:2px 7px">Doc ${i+1}</span>
-        <button onclick="removeFile(${i})" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;font-size:14px;line-height:1">&#215;</button>
-      </div>
-    </div>`).join('');
-  const n = fileList.length;
-  document.getElementById('queue-count').textContent = n + ' file' + (n > 1 ? 's' : '') + ' — will be merged and analysed together';
+  var queue = document.getElementById('file-queue');
+  var dz    = document.getElementById('drop-zone');
+  var btn   = document.getElementById('btn-analyse');
+  if (!fileList.length) {
+    queue.classList.remove('has-files'); dz.style.display=''; btn.disabled=true; btn.style.opacity='.35'; return;
+  }
+  dz.style.display='none'; queue.classList.add('has-files'); btn.disabled=false; btn.style.opacity='1';
+  document.getElementById('file-list').innerHTML = fileList.map(function(f,i) {
+    return '<div class="file-row"><div class="file-left"><span style="font-size:16px">&#128196;</span>'
+      +'<div><div class="file-name" title="'+f.name+'">'+f.name+'</div>'
+      +'<div class="file-size">'+fmtBytes(f.size)+'</div></div></div>'
+      +'<div class="file-right"><span class="file-badge">Doc '+(i+1)+'</span>'
+      +'<button class="file-remove" onclick="removeFile('+i+')">&#215;</button></div></div>';
+  }).join('');
+  var n = fileList.length;
+  document.getElementById('queue-count').textContent = n+' file'+(n>1?'s':'')+' \u2014 merged and analysed together';
 }
 
-document.getElementById('file-input').addEventListener('change', e => {
-  addFiles(e.target.files); e.target.value='';
-});
-const dz = document.getElementById('drop-zone');
-dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('active'); });
-dz.addEventListener('dragleave', ()  => dz.classList.remove('active'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('active');
-  addFiles(e.dataTransfer.files);
-});
-
-// Allow dropping anywhere on the page when queue is visible
-document.addEventListener('dragover', e => e.preventDefault());
-document.addEventListener('drop', e => {
+document.getElementById('file-input').addEventListener('change', function(e) { addFiles(e.target.files); e.target.value=''; });
+var dzEl = document.getElementById('drop-zone');
+dzEl.addEventListener('dragover',  function(e){ e.preventDefault(); dzEl.classList.add('drag-over'); });
+dzEl.addEventListener('dragleave', function(){  dzEl.classList.remove('drag-over'); });
+dzEl.addEventListener('drop', function(e){ e.preventDefault(); dzEl.classList.remove('drag-over'); addFiles(e.dataTransfer.files); });
+document.addEventListener('dragover', function(e){ e.preventDefault(); });
+document.addEventListener('drop', function(e){
   e.preventDefault();
-  const pdfs = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  var pdfs = Array.from(e.dataTransfer.files).filter(function(f){ return f.name.toLowerCase().endsWith('.pdf'); });
   if (pdfs.length) addFiles(pdfs);
 });
 
-// ── PDF text extraction ──
-// Render a PDF page to base64 JPEG
-async function renderPageToBase64(page, scale = 1.5) {
-  const viewport = page.getViewport({ scale });
-  const canvas   = document.createElement('canvas');
-  canvas.width   = viewport.width;
-  canvas.height  = viewport.height;
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+// ── OCR HELPERS ───────────────────────────────
+function renderPageToBase64(page) {
+  var vp = page.getViewport({scale:1.5});
+  var cv = document.createElement('canvas');
+  cv.width=vp.width; cv.height=vp.height;
+  return page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise
+    .then(function(){ return cv.toDataURL('image/jpeg',0.85).split(',')[1]; });
 }
 
-// OCR up to 5 pages in a single API call using multi-image content blocks
-// This is much faster than one-call-per-page
-async function ocrPagesBatch(pages, startPageNum, apiKey) {
-  const content = [];
-  for (let i = 0; i < pages.length; i++) {
-    content.push({ type: 'text', text: `--- PAGE ${startPageNum + i} ---` });
-    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: pages[i] } });
+function ocrBatch(images, startPage, apiKey) {
+  var content = [];
+  for (var i=0; i<images.length; i++) {
+    content.push({type:'text', text:'--- PAGE '+(startPage+i)+' ---'});
+    content.push({type:'image', source:{type:'base64', media_type:'image/jpeg', data:images[i]}});
   }
-  content.push({
-    type: 'text',
-    text: 'Transcribe all text from each page above. For each page output "--- PAGE N ---" as a header then the full text below it. Preserve numbers, tables, and formatting as plain text. Output transcription only, no commentary.'
-  });
-
-  const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 60000); // 60s timeout
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content }]
-      })
+  content.push({type:'text', text:'Transcribe all text from each page. Output "--- PAGE N ---" header then the text for each page. Preserve numbers and tables. Output transcription only.'});
+  var ctrl = new AbortController();
+  var tmr  = setTimeout(function(){ ctrl.abort(); }, 90000);
+  return fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', signal:ctrl.signal,
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4000,messages:[{role:'user',content:content}]})
+  }).then(function(r){
+    clearTimeout(tmr);
+    return r.json().then(function(d){
+      if (!r.ok) throw new Error('OCR '+r.status+': '+(d.error&&d.error.message||r.statusText));
+      return d.content.filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
     });
-    clearTimeout(timeout);
-    if (!resp.ok) {
-      const e = await resp.json().catch(() => ({}));
-      throw new Error('OCR error ' + resp.status + ': ' + (e?.error?.message || resp.statusText));
-    }
-    const data = await resp.json();
-    return data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  } catch(e) {
-    clearTimeout(timeout);
-    if (e.name === 'AbortError') throw new Error('OCR timed out after 60s — PDF may be too large or complex');
-    throw e;
-  }
+  }).catch(function(e){ clearTimeout(tmr); if(e.name==='AbortError') throw new Error('OCR timed out after 90s'); throw e; });
 }
 
-// Smart extraction: native text first, targeted OCR only on fee-relevant scanned pages
-async function extractText(file, onProgress) {
-  const apiKey = sessionStorage.getItem('cf_api_key') || document.getElementById('api-key').value.trim();
-  if (!apiKey) throw new Error('No API key found — please enter it above before uploading');
+var FEE_KW = ['fee','fees','royalt','payment','rate card','charge','revenue','subscription','tier','minimum','advance','percentage','%','$','\u00a3','\u20ac'];
+function looksFeeLike(t) { var l=t.toLowerCase(); return FEE_KW.some(function(k){return l.indexOf(k)!==-1;}); }
 
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-
-  // Keywords that suggest a page contains fee / payment information
-  const FEE_KEYWORDS = [
-    'fee', 'fees', 'royalt', 'payment', 'rate', 'rates', 'charge', 'charges',
-    'revenue', 'price', 'pricing', 'cost', 'costs', 'tariff', 'schedule',
-    'per user', 'per month', 'per play', 'subscription', 'tier', 'minimum',
-    'advance', 'recoup', 'percentage', '%', '$', '£', '€'
-  ];
-
-  function looksFeeLike(text) {
-    const lower = text.toLowerCase();
-    return FEE_KEYWORDS.some(k => lower.includes(k));
-  }
-
-  const nativePages  = []; // { pageNum, text }
-  const scanNative   = []; // scanned pages that neighbour a fee section (small sample for context)
-  const scanFeePages = []; // scanned pages most likely to contain fees — OCR these
-  const scanSkipped  = []; // scanned pages with no fee signal — skip OCR
-
-  // ── Pass 1: read all native text, flag scanned pages ──
-  const pageData = []; // { pageNum, native, isScanned }
-  for (let i = 1; i <= pdf.numPages; i++) {
-    if (onProgress) onProgress(i, pdf.numPages, false, `reading page ${i}/${pdf.numPages}`);
-    const page    = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const native  = content.items.map(x => x.str).join(' ').trim();
-    pageData.push({ pageNum: i, page, native, isScanned: native.length <= 50 });
-  }
-
-  // ── Pass 2: for scanned pages, check neighbours for fee keywords ──
-  // If a scanned page is surrounded by text pages that mention fees,
-  // it's very likely a rate card or table — OCR it.
-  // Otherwise skip it to avoid timeout on large documents.
-  for (let i = 0; i < pageData.length; i++) {
-    const pd = pageData[i];
-    if (!pd.isScanned) {
-      nativePages.push({ pageNum: pd.pageNum, text: pd.native });
-      continue;
-    }
-
-    // Check surrounding text pages (±2 pages) for fee signals
-    const neighbours = [
-      pageData[i-2]?.native || '',
-      pageData[i-1]?.native || '',
-      pageData[i+1]?.native || '',
-      pageData[i+2]?.native || '',
-    ].join(' ');
-
-    if (looksFeeLike(neighbours) || looksFeeLike(pd.native)) {
-      scanFeePages.push(pd);
-    } else {
-      scanSkipped.push(pd.pageNum);
-    }
-  }
-
-  // ── Pass 3: OCR only the fee-relevant scanned pages, in batches of 3 ──
-  const ocrResults = {};
-  const BATCH = 3;
-  for (let b = 0; b < scanFeePages.length; b += BATCH) {
-    const batch     = scanFeePages.slice(b, b + BATCH);
-    const batchNums = batch.map(x => x.pageNum);
-    if (onProgress) onProgress(batchNums[0], pdf.numPages, true,
-      `OCR page${batchNums.length > 1 ? 's' : ''} ${batchNums.join(',')} of ${pdf.numPages}`);
-
-    const images  = await Promise.all(batch.map(x => renderPageToBase64(x.page)));
-    const rawText = await ocrPagesBatch(images, batchNums[0], apiKey);
-
-    batch.forEach((item, idx) => {
-      const marker  = `--- PAGE ${item.pageNum} ---`;
-      const nextNum = batch[idx + 1]?.pageNum;
-      const nextMk  = nextNum ? `--- PAGE ${nextNum} ---` : null;
-      const start   = rawText.indexOf(marker);
-      const end     = nextMk ? rawText.indexOf(nextMk) : rawText.length;
-      ocrResults[item.pageNum] = start >= 0
-        ? rawText.slice(start + marker.length, end > 0 ? end : undefined).trim()
-        : rawText;
+// ── PDF EXTRACTION ────────────────────────────
+function extractOneFile(file, docIdx, docTotal, onProgress) {
+  var apiKey = getKey();
+  if (!apiKey) return Promise.reject(new Error('No API key \u2014 please enter it above.'));
+  return file.arrayBuffer()
+    .then(function(buf){ return pdfjsLib.getDocument({data:buf}).promise; })
+    .then(function(pdf){
+      var pageData = [];
+      var chain = Promise.resolve();
+      for (var i=1; i<=pdf.numPages; i++) {
+        (function(pn){
+          chain = chain.then(function(){
+            onProgress('Reading page '+pn+'/'+pdf.numPages);
+            return pdf.getPage(pn).then(function(pg){
+              return pg.getTextContent().then(function(c){
+                var native = c.items.map(function(x){return x.str;}).join(' ').trim();
+                pageData.push({pageNum:pn, page:pg, native:native, scanned:native.length<=50});
+              });
+            });
+          });
+        })(i);
+      }
+      return chain.then(function(){
+        var toOcr=[], skipped=[];
+        for (var j=0; j<pageData.length; j++) {
+          if (!pageData[j].scanned) continue;
+          var nb = [pageData[j-2]?pageData[j-2].native:'', pageData[j-1]?pageData[j-1].native:'',
+                    pageData[j+1]?pageData[j+1].native:'', pageData[j+2]?pageData[j+2].native:''].join(' ');
+          if (looksFeeLike(nb)||looksFeeLike(pageData[j].native)) { toOcr.push(pageData[j]); }
+          else { skipped.push(pageData[j].pageNum); }
+        }
+        var ocrMap={}, BATCH=3, ocrChain=Promise.resolve();
+        for (var b=0; b<toOcr.length; b+=BATCH) {
+          (function(batch){
+            ocrChain = ocrChain.then(function(){
+              var nums = batch.map(function(x){return x.pageNum;});
+              onProgress('OCR pages '+nums.join(',')+' of '+pdf.numPages);
+              return Promise.all(batch.map(function(x){return renderPageToBase64(x.page);}))
+                .then(function(imgs){ return ocrBatch(imgs, nums[0], apiKey); })
+                .then(function(raw){
+                  batch.forEach(function(item,idx){
+                    var mk='--- PAGE '+item.pageNum+' ---';
+                    var nm=batch[idx+1]?'--- PAGE '+batch[idx+1].pageNum+' ---':null;
+                    var s=raw.indexOf(mk), e=nm?raw.indexOf(nm):raw.length;
+                    ocrMap[item.pageNum]=s>=0?raw.slice(s+mk.length,e>0?e:undefined).trim():raw;
+                  });
+                });
+            });
+          })(toOcr.slice(b,b+BATCH));
+        }
+        return ocrChain.then(function(){
+          var out='';
+          for (var k=0; k<pageData.length; k++) {
+            var pn=pageData[k].pageNum;
+            if (ocrMap[pn]!==undefined) { out+='[PAGE '+pn+' \u2014 OCR]\n'+ocrMap[pn]+'\n\n'; }
+            else if (skipped.indexOf(pn)!==-1) { out+='[PAGE '+pn+' \u2014 scanned/skipped]\n\n'; }
+            else { out+='[PAGE '+pn+']\n'+pageData[k].native+'\n\n'; }
+          }
+          return {text:out, scanned:toOcr.length, skipped:skipped.length};
+        });
+      });
     });
-  }
-
-  // ── Assemble final text in page order ──
-  let out = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    if (ocrResults[i] !== undefined) {
-      out += `[PAGE ${i} — OCR]\n` + ocrResults[i] + '\n\n';
-    } else if (scanSkipped.includes(i)) {
-      out += `[PAGE ${i} — scanned, skipped (no fee content detected)]\n\n`;
-    } else {
-      const p = nativePages.find(x => x.pageNum === i);
-      if (p) out += `[PAGE ${i}]\n` + p.text + '\n\n';
-    }
-  }
-
-  const scannedPages = scanFeePages.length;
-  const skippedPages = scanSkipped.length;
-  return { text: out, ocrUsed: scannedPages > 0, scannedPages, skippedPages };
 }
 
-
-async function extractAllFiles(files) {
-  const parts = [];
-  let totalScanned = 0;
-  let totalSkipped = 0;
-
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-
-    const onProgress = (pageNum, totalPages, isOcr, detail) => {
-      const label = isOcr
-        ? `Doc ${i+1}/${files.length} — ${detail || 'OCR page ' + pageNum + '/' + totalPages}`
-        : `Doc ${i+1}/${files.length} — reading page ${pageNum}/${totalPages}`;
-      setStep('extract', 'active', label);
-    };
-
-    let result;
-    try {
-      result = await extractText(f, onProgress);
-    } catch(e) {
-      // Surface a clear error with the filename
-      throw new Error(`Failed on "${f.name}": ${e.message}`);
-    }
-
-    totalScanned += result.scannedPages || 0;
-    totalSkipped += result.skippedPages || 0;
-    parts.push('='.repeat(60) + '\nDOCUMENT ' + (i+1) + ': ' + f.name + '\n' + '='.repeat(60) + '\n\n' + result.text);
-  }
-
-  const fileNote    = files.length + ' file' + (files.length > 1 ? 's' : '') + ' merged';
-  const ocrNote     = totalScanned > 0 ? ` · ${totalScanned} page${totalScanned > 1 ? 's' : ''} OCR’d` : '';
-  const skipNote    = totalSkipped > 0 ? ` · ${totalSkipped} non-fee scanned page${totalSkipped > 1 ? 's' : ''} skipped` : '';
-  setStep('extract', 'done', fileNote + ocrNote + skipNote);
-  return parts.join('\n\n');
-}
-
-
-// ── Claude API: fee extraction ──
-const FEE_SYSTEM = `You are a contract analysis specialist. You will receive one or more related contract documents merged together (each clearly labelled with its filename). Analyse ALL of them as a single contract package.
-
-Extract EVERY fee, charge, payment, royalty, or service fee calculation found anywhere across ALL documents. When definitions in one document apply to fee calculations in another, treat them as connected.
-
-For each fee type found, output an object with exactly these fields:
-- "fee_name": short human-readable name
-- "section_reference": section/clause number and which document it comes from
-- "description": 1-2 sentence plain-English summary
-- "variables": object of short symbol keys mapped to plain-English definitions
-- "tiers": array of {tier_name, condition, equation} objects using your variable symbols
-- "total_equation": complete combined algebraic equation
-- "notes": floors, caps, exemptions, cross-document references
-
-Return ONLY a valid JSON array. No markdown, no code fences. Pure JSON only.`;
-
-async function callAPI(text) {
-  const key = sessionStorage.getItem('cf_api_key') || document.getElementById('api-key').value.trim();
-  if (!key) throw new Error('No API key — please enter your Anthropic key above.');
-  const truncated = text.length > 100000 ? text.slice(0, 100000) + '\n[truncated]' : text;
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      system: FEE_SYSTEM,
-      messages: [{ role: 'user', content: 'Extract all fee calculation sections from this contract package.\n\nDOCUMENTS:\n' + truncated }]
-    })
+function extractAllFiles(files) {
+  var parts=[], totS=0, totSk=0, chain=Promise.resolve();
+  files.forEach(function(f,i){
+    chain = chain.then(function(){
+      return extractOneFile(f, i, files.length, function(detail){
+        setStep('extract','active','Doc '+(i+1)+'/'+files.length+' \u2014 '+detail);
+      }).then(function(r){
+        totS+=r.scanned; totSk+=r.skipped;
+        parts.push('='.repeat(60)+'\nDOCUMENT '+(i+1)+': '+f.name+'\n'+'='.repeat(60)+'\n\n'+r.text);
+      }).catch(function(e){ throw new Error('Failed on "'+f.name+'": '+e.message); });
+    });
   });
-  if (!resp.ok) {
-    const e = await resp.json().catch(() => ({}));
-    throw new Error('API ' + resp.status + ': ' + (e?.error?.message || resp.statusText));
-  }
-  const data = await resp.json();
-  let raw = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
-  return JSON.parse(raw);
+  return chain.then(function(){
+    var note=files.length+' file'+(files.length>1?'s':'')+' merged';
+    if (totS) note+=' \u00b7 '+totS+' page'+(totS>1?'s':'')+' OCR\u2019d';
+    if (totSk) note+=' \u00b7 '+totSk+' skipped';
+    setStep('extract','done',note);
+    return parts.join('\n\n');
+  });
 }
 
-// ── Python module generator ──
+// ── CLAUDE FEE ANALYSIS ───────────────────────
+var FEE_SYSTEM = 'You are a contract analysis specialist. Analyse ALL provided documents as a single package. Extract EVERY fee, charge, payment, royalty, or service fee calculation. For each fee output: "fee_name", "section_reference", "description", "variables" (symbol->definition object), "tiers" (array of {tier_name,condition,equation}), "total_equation", "notes". Return ONLY a valid JSON array, no markdown.';
+
+function callAPI(text) {
+  var key = getKey();
+  if (!key) return Promise.reject(new Error('No API key \u2014 please enter your Anthropic key above.'));
+  var trunc = text.length > 100000 ? text.slice(0,100000)+'\n[truncated]' : text;
+  return fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:8000,system:FEE_SYSTEM,
+      messages:[{role:'user',content:'Extract all fee sections.\n\nDOCUMENTS:\n'+trunc}]})
+  }).then(function(r){
+    return r.json().then(function(d){
+      if (!r.ok) throw new Error('API '+r.status+': '+(d.error&&d.error.message||r.statusText));
+      var raw=d.content.filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+      raw=raw.replace(/^```(?:json)?\s*/m,'').replace(/\s*```$/m,'').trim();
+      return JSON.parse(raw);
+    });
+  });
+}
+
+// ── PYTHON MODULE GENERATOR ───────────────────
 function generateModule(fees, filenames) {
-  const names = Array.isArray(filenames) ? filenames : [filenames];
-  const label = names.join(', ');
-  const stem  = names[0].replace(/\.pdf$/i, '').replace(/\s+/g, '_');
-  const today = new Date().toISOString().slice(0, 10);
-  const L = [];
-
-  L.push('"""\nAuto-generated Fee Calculator\nSources : ' + label + '\nDate    : ' + today + '\n\nUsage:\n    from ' + stem + '_fee_equations import print_equation_summary, get_all_equations\n    print_equation_summary()\n"""');
-  L.push('from __future__ import annotations\n');
-
-  for (const fee of fees) {
-    const fn     = 'calculate_' + fee.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-    const params = Object.keys(fee.variables || {});
-    const ps     = params.length ? params.map(p => p + ': float').join(', ') : '**kwargs';
-    const tiers  = fee.tiers || [];
-    L.push('# ' + '-'.repeat(66) + '\n# ' + fee.fee_name + '  [' + fee.section_reference + ']\n# ' + '-'.repeat(66) + '\n');
-    L.push('def ' + fn + '(' + ps + ') -> dict:');
-    L.push('    """\n    ' + fee.fee_name + '  [' + fee.section_reference + ']\n\n    DESCRIPTION\n    ' + '-'.repeat(40) + '\n    ' + (fee.description||'') + '\n\n    VARIABLES\n    ' + '-'.repeat(40));
-    for (const [v,d] of Object.entries(fee.variables||{})) L.push('    ' + v.padEnd(8) + ': ' + d);
-    if (tiers.length > 1) {
-      L.push('\n    TIERS\n    ' + '-'.repeat(40));
-      for (const t of tiers) L.push('    [' + t.tier_name + ']\n      Condition : ' + t.condition + '\n      Equation  : ' + t.equation);
+  var names=Array.isArray(filenames)?filenames:[filenames];
+  var label=names.join(', '), stem=names[0].replace(/\.pdf$/i,'').replace(/\s+/g,'_');
+  var today=new Date().toISOString().slice(0,10), L=[];
+  L.push('# Auto-generated Fee Calculator\n# Sources: '+label+'\n# Date: '+today+'\nfrom __future__ import annotations\n');
+  fees.forEach(function(fee){
+    var fn='calculate_'+fee.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+    var prms=Object.keys(fee.variables||{});
+    var ps=prms.length?prms.map(function(p){return p+': float';}).join(', '):'**kwargs';
+    var tiers=fee.tiers||[];
+    L.push('# '+'-'.repeat(60)+'\n# '+fee.fee_name+'\n# '+fee.section_reference+'\n# '+'-'.repeat(60));
+    L.push('def '+fn+'('+ps+') -> dict:');
+    L.push('    """');
+    L.push('    '+fee.fee_name+' ['+fee.section_reference+']');
+    L.push('    '+(fee.description||''));
+    L.push('\n    Variables:');
+    Object.entries(fee.variables||{}).forEach(function(e){L.push('      '+e[0].padEnd(8)+': '+e[1]);});
+    if (tiers.length>1) {
+      L.push('\n    Tiers:');
+      tiers.forEach(function(t){L.push('      ['+t.tier_name+']\n        Condition: '+t.condition+'\n        Equation:  '+t.equation);});
     }
-    L.push('\n    TOTAL EQUATION\n    ' + '-'.repeat(40) + '\n    ' + (fee.total_equation||''));
-    if (fee.notes) L.push('\n    NOTES\n    ' + '-'.repeat(40) + '\n    ' + fee.notes);
-    L.push('    """\n    tiers = []');
-    for (const t of tiers) L.push('    tiers.append({"tier_name": ' + JSON.stringify(t.tier_name) + ', "condition": ' + JSON.stringify(t.condition) + ', "equation": ' + JSON.stringify(t.equation) + ', "fee": None})');
-    L.push('    return {"fee_name": ' + JSON.stringify(fee.fee_name) + ', "section": ' + JSON.stringify(fee.section_reference) + ', "inputs": {' + params.map(p => '"'+p+'": '+p).join(', ') + '}, "total_equation": ' + JSON.stringify(fee.total_equation||'') + ', "tiers": tiers, "total_fee": None}\n');
-  }
-  L.push('ALL_FEE_CALCULATORS = {' + fees.map(f => '\n    ' + JSON.stringify(f.fee_name) + ': calculate_' + f.fee_name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')).join(',') + '\n}\n');
-  L.push('def get_all_equations():\n    return ' + JSON.stringify(fees, null, 2) + '\n');
-  L.push('def print_equation_summary():\n    fees = get_all_equations()\n    print("\\nCONTRACT FEE EQUATIONS\\nSources: ' + label.replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '\\n" + "="*70)\n    for i, f in enumerate(fees, 1):\n        print(f"\\n  {i}. {f[\'fee_name\']}  [{f[\'section_reference\']}]\\n     {f[\'description\']}")\n        print("\\n     VARIABLES:")\n        for k,v in f[\'variables\'].items(): print(f"       {k:<8} = {v}")\n        if len(f.get(\'tiers\',[])) > 1:\n            print("\\n     TIERS:")\n            for t in f[\'tiers\']: print(f"       [{t[\'tier_name\']}]\\n         Condition : {t[\'condition\']}\\n         Equation  : {t[\'equation\']}")\n        print(f"\\n     TOTAL EQUATION:\\n       {f[\'total_equation\']}")\n        if f.get(\'notes\'): print(f"\\n     NOTES: {f[\'notes\']}")\n        print("\\n  " + "-"*66)\n\nif __name__ == \'__main__\':\n    print_equation_summary()');
+    L.push('\n    Total equation:\n      '+(fee.total_equation||''));
+    if (fee.notes) L.push('\n    Notes:\n      '+fee.notes);
+    L.push('    """');
+    L.push('    tiers = []');
+    tiers.forEach(function(t){
+      L.push('    tiers.append({"tier_name":'+JSON.stringify(t.tier_name)+',"condition":'+JSON.stringify(t.condition)+',"equation":'+JSON.stringify(t.equation)+',"fee":None})');
+    });
+    L.push('    return {"fee_name":'+JSON.stringify(fee.fee_name)+',"section":'+JSON.stringify(fee.section_reference)+',"inputs":{'+prms.map(function(p){return '"'+p+'":'+p;}).join(',')+'}, "total_equation":'+JSON.stringify(fee.total_equation||'')+',"tiers":tiers,"total_fee":None}\n');
+  });
+  L.push('def get_all_equations():\n    return '+JSON.stringify(fees,null,2)+'\n');
+  L.push('def print_equation_summary():\n    for i,f in enumerate(get_all_equations(),1):\n        print(f"\\n{i}. {f[\'fee_name\']}  [{f[\'section_reference\']}]\\n   {f[\'description\']}")\n        for k,v in f[\'variables\'].items(): print(f"  {k:<8} = {v}")\n        for t in f.get(\'tiers\',[]): print(f"  [{t[\'tier_name\']}]\\n    {t[\'equation\']}")\n        print(f"  TOTAL: {f[\'total_equation\']}")\n\nif __name__==\'__main__\':\n    print_equation_summary()');
   return L.join('\n');
 }
 
-// ── Render results ──
+// ── RENDER RESULTS ────────────────────────────
 function renderResults(fees, filenames) {
-  const docCount = Array.isArray(filenames) ? filenames.length : 1;
-  const tiered   = fees.filter(f => (f.tiers||[]).length > 1).length;
-  document.getElementById('summary-grid').innerHTML =
-    '<div class="metric-card"><div class="metric-label">Fee types found</div><div class="metric-value">' + fees.length + '</div></div>' +
-    '<div class="metric-card"><div class="metric-label">Tiered equations</div><div class="metric-value">' + tiered + '</div></div>' +
-    '<div class="metric-card"><div class="metric-label">Documents merged</div><div class="metric-value">' + docCount + '</div></div>';
-  const cont = document.getElementById('fee-cards');
-  cont.innerHTML = '';
-  fees.forEach(fee => {
-    const tiers = fee.tiers || [];
-    const vars  = fee.variables || {};
-    const card  = document.createElement('div');
-    card.className = 'fee-card';
-    const varsH = Object.keys(vars).length
-      ? '<div><div class="field-label">Variables</div><div class="var-list">'
-        + Object.entries(vars).map(([v,d]) => '<div class="var-row"><span class="var-sym">' + v + '</span><span class="var-def">' + d + '</span></div>').join('')
-        + '</div></div>' : '';
-    const tiersH = tiers.length
-      ? '<div><div class="field-label">Tiers (' + tiers.length + ')</div><div class="tier-grid">'
-        + tiers.map(t => '<div class="tier-item"><span class="tier-tag">' + (t.tier_name||'') + '</span><div class="tier-cond">' + (t.condition||'') + '</div><div class="tier-eq">' + (t.equation||'') + '</div></div>').join('')
-        + '</div></div>' : '';
-    card.innerHTML =
-      '<div class="fee-header" onclick="this.closest(\'.fee-card\').classList.toggle(\'open\')">'
-      + '<span class="fee-name">' + fee.fee_name + '</span>'
-      + '<div class="fee-meta"><span class="tag-section">' + (fee.section_reference||'') + '</span>'
-      + (tiers.length > 1 ? '<span class="tag-tiers">' + tiers.length + ' tiers</span>' : '')
-      + '<span class="chevron">&#9660;</span></div></div>'
-      + '<div class="fee-body"><div class="fee-inner">'
-      + '<div><div class="field-label">Description</div><div class="field-text">' + (fee.description||'') + '</div></div>'
-      + varsH + tiersH
-      + '<div><div class="field-label">Total equation</div><div class="total-eq">' + (fee.total_equation||'') + '</div></div>'
-      + (fee.notes ? '<div><div class="field-label">Notes</div><div class="notes-text">' + fee.notes + '</div></div>' : '')
-      + '</div></div>';
+  var docs=Array.isArray(filenames)?filenames.length:1;
+  var tiered=fees.filter(function(f){return (f.tiers||[]).length>1;}).length;
+  document.getElementById('summary-grid').innerHTML=
+    '<div class="metric-card"><div class="metric-label">Fee types found</div><div class="metric-value">'+fees.length+'</div></div>'+
+    '<div class="metric-card"><div class="metric-label">Tiered equations</div><div class="metric-value">'+tiered+'</div></div>'+
+    '<div class="metric-card"><div class="metric-label">Documents</div><div class="metric-value">'+docs+'</div></div>';
+  var cont=document.getElementById('fee-cards');
+  cont.innerHTML='';
+  fees.forEach(function(fee){
+    var tiers=fee.tiers||[], vars=fee.variables||{};
+    var card=document.createElement('div'); card.className='fee-card';
+    var vh=Object.keys(vars).length?'<div><div class="field-label">Variables</div><div class="var-list">'+
+      Object.entries(vars).map(function(e){return '<div class="var-row"><span class="var-sym">'+e[0]+'</span><span class="var-def">'+e[1]+'</span></div>';}).join('')+'</div></div>':'';
+    var th=tiers.length?'<div><div class="field-label">Tiers ('+tiers.length+')</div><div class="tier-grid">'+
+      tiers.map(function(t){return '<div class="tier-item"><span class="tier-tag">'+(t.tier_name||'')+'</span><div class="tier-cond">'+(t.condition||'')+'</div><div class="tier-eq">'+(t.equation||'')+'</div></div>';}).join('')+'</div></div>':'';
+    card.innerHTML='<div class="fee-header" onclick="this.closest(\'.fee-card\').classList.toggle(\'open\')">'
+      +'<span class="fee-name">'+fee.fee_name+'</span>'
+      +'<div class="fee-meta"><span class="tag-section">'+(fee.section_reference||'')+'</span>'
+      +(tiers.length>1?'<span class="tag-tiers">'+tiers.length+' tiers</span>':'')
+      +'<span class="chevron">&#9660;</span></div></div>'
+      +'<div class="fee-body"><div class="fee-inner">'
+      +'<div><div class="field-label">Description</div><div class="field-text">'+(fee.description||'')+'</div></div>'
+      +vh+th
+      +'<div><div class="field-label">Total equation</div><div class="total-eq">'+(fee.total_equation||'')+'</div></div>'
+      +(fee.notes?'<div><div class="field-label">Notes</div><div class="notes-text">'+fee.notes+'</div></div>':'')
+      +'</div></div>';
     cont.appendChild(card);
   });
   if (fees.length) cont.firstChild.classList.add('open');
 }
 
-
-async function startAnalysis() {
+// ── MAIN PIPELINE ─────────────────────────────
+function startAnalysis() {
   if (!fileList.length) return;
-  const names = fileList.map(f => f.name);
-  dz.style.display = 'none';
+  var names = fileList.map(function(f){ return f.name; });
+  document.getElementById('upload-section').style.display = 'none';
   document.getElementById('progress').classList.add('visible');
-  setStatus('upload-status', `Processing ${names.length} file(s)…`, 'info');
+  showMsg('upload-status','Processing...','info');
 
-  try {
-    // Step 1: extract text from all files and merge
-    const combined = await extractAllFiles(fileList);
-
-    // Step 2: Claude API — send the merged document
-    setStep('api', 'active', 'waiting…');
-    setStatus('upload-status', 'Calling Claude API — 15–30 seconds…', 'info');
-    const fees = await callAPI(combined);
-    setStep('api', 'done', `${fees.length} fee type${fees.length!==1?'s':''} found`);
-
-    // Step 3: generate Python module
-    setStep('gen', 'active');
-    generatedCode = generateModule(fees, names);
-    setStep('gen', 'done');
-
-    setStatus('upload-status', `Done — ${fees.length} fee type(s) across ${names.length} document(s).`, 'success');
-    renderResults(fees, names);
-    document.getElementById('results').classList.add('visible');
-
-    const stem = names[0].replace(/\.pdf$/i,'');
-    const suffix = names.length > 1 ? `_plus${names.length-1}_docs` : '';
-    document.getElementById('btn-dl').onclick = () => {
-      const blob = new Blob([generatedCode], { type: 'text/plain' });
-      const url  = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href: url, download: stem+suffix+'_fee_equations.py' });
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
-  } catch(err) {
-    setStatus('upload-status', 'Error: ' + err.message, 'error');
-    document.getElementById('progress').classList.remove('visible');
-    dz.style.display = '';
-  }
+  extractAllFiles(fileList)
+    .then(function(combined) {
+      setStep('api','active','waiting\u2026');
+      showMsg('upload-status','Calling Claude API \u2014 15\u201330 seconds\u2026','info');
+      return callAPI(combined);
+    })
+    .then(function(fees) {
+      setStep('api','done',fees.length+' fee type'+(fees.length!==1?'s':'')+' found');
+      setStep('gen','active');
+      generatedCode = generateModule(fees, names);
+      setStep('gen','done');
+      showMsg('upload-status','Done \u2014 '+fees.length+' fee type(s) across '+names.length+' document(s).','success');
+      renderResults(fees, names);
+      document.getElementById('results').classList.add('visible');
+      var stem = names[0].replace(/\.pdf$/i,'')+(names.length>1?'_plus'+(names.length-1):'');
+      document.getElementById('btn-dl').onclick = function() {
+        var blob=new Blob([generatedCode],{type:'text/plain'});
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a'); a.href=url; a.download=stem+'_fee_equations.py'; a.click();
+        URL.revokeObjectURL(url);
+      };
+    })
+    .catch(function(err) {
+      showMsg('upload-status','Error: '+err.message,'error');
+      document.getElementById('progress').classList.remove('visible');
+      document.getElementById('upload-section').style.display='';
+    });
 }
 
 function resetTool() {
-  fileList = [];
-  generatedCode = '';
+  fileList=[]; generatedCode='';
   document.getElementById('results').classList.remove('visible');
   document.getElementById('progress').classList.remove('visible');
-  document.getElementById('upload-status').className = 'status-msg';
-  document.getElementById('file-queue').style.display = 'none';
-  dz.style.display = '';
-  ['extract','api','gen'].forEach(id => setStep(id, ''));
-  document.getElementById('file-input').value = '';
+  document.getElementById('upload-section').style.display='';
+  document.getElementById('upload-status').className='status-msg';
+  document.getElementById('file-queue').classList.remove('has-files');
+  document.getElementById('drop-zone').style.display='';
+  var btn=document.getElementById('btn-analyse'); btn.disabled=true; btn.style.opacity='.35';
+  document.getElementById('file-input').value='';
+  ['extract','api','gen'].forEach(function(id){ setStep(id,''); });
 }
 </script>
 </body>
