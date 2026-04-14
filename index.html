@@ -410,7 +410,7 @@ footer {
   <header>
     <div class="badge"><span class="badge-dot"></span>AI-powered · Claude API</div>
     <h1>Contract Fee<br/><span>Equation Extractor</span></h1>
-    <p class="tagline">Upload any contract PDF. The tool finds every fee and royalty section, extracts the algebraic equations, and generates a ready-to-use Python module.</p>
+    <p class="tagline">Upload one or more related contract PDFs — framework agreements, service schedules, annexes. The tool merges them and extracts every fee equation across the whole package.</p>
   </header>
 
   <!-- ── API Key ── -->
@@ -426,13 +426,23 @@ footer {
 
   <!-- ── Upload ── -->
   <div class="section">
-    <div class="section-title">Contract Document</div>
+    <div class="section-title">Contract Documents</div>
     <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
-      <div class="drop-icon">📄</div>
-      <div class="drop-title">Drop a PDF here, or click to browse</div>
-      <div class="drop-sub">Service schedules, licensing agreements, distribution contracts — <strong>any PDF</strong></div>
-      <input type="file" id="file-input" accept=".pdf"/>
+      <div class="drop-icon">📂</div>
+      <div class="drop-title">Drop PDFs here, or click to browse</div>
+      <div class="drop-sub">Add all related files — framework agreement, schedules, annexes<br/><strong>Multiple PDFs are merged and analysed together</strong></div>
+      <input type="file" id="file-input" accept=".pdf" multiple/>
     </div>
+
+    <!-- File queue (shown after files added) -->
+    <div id="file-queue" style="display:none;flex-direction:column;gap:6px;margin-top:14px">
+      <div id="file-list"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <span id="queue-count" style="font-family:var(--mono);font-size:12px;color:var(--muted)"></span>
+        <button onclick="document.getElementById('file-input').click()" style="font-family:var(--sans);font-size:12px;color:var(--accent2);background:transparent;border:1px solid rgba(123,110,246,.25);border-radius:6px;padding:5px 12px;cursor:pointer">+ Add more files</button>
+      </div>
+    </div>
+    <button id="btn-analyse" onclick="startAnalysis()" disabled style="width:100%;margin-top:14px;padding:13px;background:var(--accent);border:none;border-radius:10px;font-family:var(--sans);font-size:14px;color:#fff;cursor:pointer;opacity:.3">Analyse documents</button>
     <div class="status-msg" id="upload-status"></div>
   </div>
 
@@ -461,7 +471,7 @@ footer {
     <div id="fee-cards"></div>
     <div class="btn-row">
       <button class="btn btn-green" id="btn-dl">⬇ Download Python module</button>
-      <button class="btn btn-outline" onclick="resetTool()">↩ Analyse another document</button>
+      <button class="btn btn-outline" onclick="resetTool()">↩ Analyse another set</button>
     </div>
   </div>
 
@@ -517,17 +527,63 @@ function setStep(id, state) {
 }
 
 // ── File handlers ──
+function fmtBytes(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB';}
+
+function addFiles(files) {
+  let added = 0;
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith('.pdf')) continue;
+    if (fileList.some(x => x.name === f.name && x.size === f.size)) continue;
+    fileList.push(f); added++;
+  }
+  if (added) renderQueue();
+}
+
+function removeFile(i) { fileList.splice(i, 1); renderQueue(); }
+
+function renderQueue() {
+  const q   = document.getElementById('file-queue');
+  const dz  = document.getElementById('drop-zone');
+  const btn = document.getElementById('btn-analyse');
+  if (!fileList.length) { q.style.display='none'; dz.style.display=''; btn.disabled=true; btn.style.opacity='.3'; return; }
+  dz.style.display = 'none';
+  q.style.display  = 'flex';
+  btn.disabled = false; btn.style.opacity = '1';
+  document.getElementById('file-list').innerHTML = fileList.map((f, i) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <span>&#128196;</span>
+        <div>
+          <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px" title="${f.name}">${f.name}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${fmtBytes(f.size)}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:4px;padding:2px 7px">Doc ${i+1}</span>
+        <button onclick="removeFile(${i})" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;font-size:14px;line-height:1">&#215;</button>
+      </div>
+    </div>`).join('');
+  const n = fileList.length;
+  document.getElementById('queue-count').textContent = n + ' file' + (n > 1 ? 's' : '') + ' — will be merged and analysed together';
+}
+
 document.getElementById('file-input').addEventListener('change', e => {
-  if (e.target.files[0]) processFile(e.target.files[0]);
+  addFiles(e.target.files); e.target.value='';
 });
 const dz = document.getElementById('drop-zone');
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('active'); });
 dz.addEventListener('dragleave', ()  => dz.classList.remove('active'));
 dz.addEventListener('drop', e => {
   e.preventDefault(); dz.classList.remove('active');
-  const f = e.dataTransfer.files[0];
-  if (f && f.type === 'application/pdf') processFile(f);
-  else setStatus('upload-status', 'Please drop a PDF file.', 'error');
+  addFiles(e.dataTransfer.files);
+});
+
+// Allow dropping anywhere on the page when queue is visible
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const pdfs = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  if (pdfs.length) addFiles(pdfs);
 });
 
 // ── PDF text extraction ──
@@ -590,7 +646,9 @@ async function callAPI(text) {
 }
 
 // ── Python module generator ──
-function generateModule(fees, filename) {
+function generateModule(fees, filenames) {
+  const filename = Array.isArray(filenames) ? filenames[0] : filenames;
+  const allNames = Array.isArray(filenames) ? filenames : [filenames];
   const lines = [];
   const stem = filename.replace(/\.pdf$/i, '').replace(/\s+/g, '_');
   const today = new Date().toISOString().slice(0, 10);
@@ -657,12 +715,12 @@ Usage:
 }
 
 // ── Render results ──
-function renderResults(fees) {
+function renderResults(fees, filenames) {
   const tiered = fees.filter(f => (f.tiers||[]).length > 1).length;
   document.getElementById('summary-grid').innerHTML = `
     <div class="metric-card"><div class="metric-label">Fee types found</div><div class="metric-value">${fees.length}</div></div>
     <div class="metric-card"><div class="metric-label">Tiered equations</div><div class="metric-value">${tiered}</div></div>
-    <div class="metric-card"><div class="metric-label">Flat rate fees</div><div class="metric-value">${fees.length - tiered}</div></div>
+    <div class="metric-card"><div class="metric-label">Documents merged</div><div class="metric-value">${Array.isArray(filenames) ? filenames.length : 1}</div></div>
   `;
 
   const container = document.getElementById('fee-cards');
@@ -720,34 +778,52 @@ function toggleCard(card) {
 }
 
 // ── Main pipeline ──
-async function processFile(file) {
-  docFilename = file.name;
+// extractText is already defined above — used per-file below
+
+async function extractAllFiles(files) {
+  const parts = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    setStep('extract', 'active', `${i+1}/${files.length} — ${f.name}`);
+    const text = await extractText(f);
+    parts.push('='.repeat(60)+'\nDOCUMENT '+(i+1)+': '+f.name+'\n'+'='.repeat(60)+'\n\n'+text);
+  }
+  setStep('extract', 'done', files.length+' file'+(files.length>1?'s':'')+' merged');
+  return parts.join('\n\n');
+}
+
+async function startAnalysis() {
+  if (!fileList.length) return;
+  const names = fileList.map(f => f.name);
   dz.style.display = 'none';
   document.getElementById('progress').classList.add('visible');
-  setStatus('upload-status', 'Processing: ' + file.name, 'info');
+  setStatus('upload-status', `Processing ${names.length} file(s)…`, 'info');
 
   try {
-    setStep('extract', 'active');
-    const text = await extractText(file);
-    setStep('extract', 'done');
+    // Step 1: extract text from all files and merge
+    const combined = await extractAllFiles(fileList);
 
-    setStep('api', 'active');
-    setStatus('upload-status', 'Calling Claude API — this takes 15–30 seconds…', 'info');
-    const fees = await callAPI(text);
-    setStep('api', 'done');
+    // Step 2: Claude API — send the merged document
+    setStep('api', 'active', 'waiting…');
+    setStatus('upload-status', 'Calling Claude API — 15–30 seconds…', 'info');
+    const fees = await callAPI(combined);
+    setStep('api', 'done', `${fees.length} fee type${fees.length!==1?'s':''} found`);
 
+    // Step 3: generate Python module
     setStep('gen', 'active');
-    generatedCode = generateModule(fees, file.name);
+    generatedCode = generateModule(fees, names);
     setStep('gen', 'done');
 
-    setStatus('upload-status', `Done — found ${fees.length} fee type(s). Python module ready.`, 'success');
-    renderResults(fees);
+    setStatus('upload-status', `Done — ${fees.length} fee type(s) across ${names.length} document(s).`, 'success');
+    renderResults(fees, names);
     document.getElementById('results').classList.add('visible');
 
+    const stem = names[0].replace(/\.pdf$/i,'');
+    const suffix = names.length > 1 ? `_plus${names.length-1}_docs` : '';
     document.getElementById('btn-dl').onclick = () => {
       const blob = new Blob([generatedCode], { type: 'text/plain' });
       const url  = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href: url, download: file.name.replace(/\.pdf$/i,'') + '_fee_equations.py' });
+      const a = Object.assign(document.createElement('a'), { href: url, download: stem+suffix+'_fee_equations.py' });
       a.click();
       URL.revokeObjectURL(url);
     };
@@ -760,12 +836,14 @@ async function processFile(file) {
 }
 
 function resetTool() {
+  fileList = [];
+  generatedCode = '';
   document.getElementById('results').classList.remove('visible');
   document.getElementById('progress').classList.remove('visible');
   document.getElementById('upload-status').className = 'status-msg';
+  document.getElementById('file-queue').style.display = 'none';
   dz.style.display = '';
   ['extract','api','gen'].forEach(id => setStep(id, ''));
-  generatedCode = '';
   document.getElementById('file-input').value = '';
 }
 </script>
